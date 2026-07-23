@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#ffb3a7">
+<title>やさしい家計簿</title>
+<style>
+  :root{
+    --bg:#fbf7f4; --card:#ffffff; --ink:#3a3330; --sub:#9a8f89;
+    --line:#efe7e1; --accent:#ff8f7a; --accent-soft:#ffe6df;
+    --mint:#7ec9a9; --sky:#7fb7e6; --lav:#b7a6e0; --lemon:#f2c96b; --rose:#ef9aad;
+    --shadow:0 6px 20px rgba(180,150,140,.12);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0}
+  body{
+    font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic UI","Meiryo",sans-serif;
+    background:var(--bg); color:var(--ink); line-height:1.5;
+    max-width:480px; margin:0 auto; min-height:100vh; position:relative;
+    padding-bottom:88px;
+  }
+  .screen{display:none; padding:16px 16px 8px; animation:fade .25s ease}
+  .screen.active{display:block}
+  @keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  h1{font-size:20px;margin:8px 4px 16px;font-weight:800;letter-spacing:.02em}
+  .muted{color:var(--sub);font-size:13px}
+  .card{background:var(--card);border-radius:20px;padding:18px;box-shadow:var(--shadow);margin-bottom:14px}
+
+  /* ホーム合計 */
+  .total-card{background:linear-gradient(135deg,#fff 0%,#fff6f2 100%);text-align:center;padding:26px 18px}
+  .total-label{font-size:13px;color:var(--sub)}
+  .total-amt{font-size:40px;font-weight:800;letter-spacing:-.02em;margin:4px 0}
+  .total-amt .yen{font-size:20px;font-weight:700;margin-right:2px}
+  .vs{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:700;
+      padding:5px 12px;border-radius:999px;background:var(--accent-soft);color:var(--accent)}
+  .vs.down{background:#e5f5ee;color:var(--mint)}
+
+  /* 分類バー */
+  .cat-row{display:flex;align-items:center;gap:10px;margin:12px 2px}
+  .cat-ic{width:34px;height:34px;border-radius:12px;display:grid;place-items:center;font-size:17px;flex:0 0 auto}
+  .cat-body{flex:1;min-width:0}
+  .cat-top{display:flex;justify-content:space-between;font-size:14px;margin-bottom:5px}
+  .cat-top b{font-weight:700}
+  .bar{height:8px;border-radius:99px;background:var(--line);overflow:hidden}
+  .bar span{display:block;height:100%;border-radius:99px}
+
+  /* 履歴 */
+  .item{display:flex;align-items:center;gap:12px;padding:12px 4px;border-bottom:1px solid var(--line)}
+  .item:last-child{border-bottom:0}
+  .item .nm{flex:1;min-width:0}
+  .item .nm .t{font-weight:600;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .item .nm .d{font-size:12px;color:var(--sub)}
+  .item .amt{font-weight:700;font-size:15px}
+  .chip{display:inline-block;font-size:11px;padding:2px 8px;border-radius:99px;background:var(--line);color:var(--sub);margin-left:6px}
+
+  /* 分析 */
+  .seg{display:flex;background:var(--line);border-radius:14px;padding:4px;margin-bottom:14px}
+  .seg button{flex:1;border:0;background:transparent;padding:8px;border-radius:11px;font-weight:700;font-size:13px;color:var(--sub)}
+  .seg button.on{background:#fff;color:var(--ink);box-shadow:0 2px 6px rgba(0,0,0,.06)}
+  .mbars{display:flex;align-items:flex-end;gap:7px;height:120px;padding-top:8px}
+  .mbar{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;justify-content:flex-end;height:100%}
+  .mbar .col{width:70%;background:linear-gradient(180deg,var(--accent),#ffc4b6);border-radius:8px 8px 4px 4px;min-height:4px}
+  .mbar .lb{font-size:11px;color:var(--sub)}
+  .sim{background:linear-gradient(135deg,#fff4ef,#fff);border:1px dashed var(--accent);border-radius:18px;padding:16px}
+  .sim .big{font-size:26px;font-weight:800;color:var(--accent)}
+
+  /* ボトムナビ */
+  .nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;
+       background:rgba(255,255,255,.92);backdrop-filter:blur(10px);border-top:1px solid var(--line);
+       display:flex;justify-content:space-around;padding:8px 0 max(8px,env(safe-area-inset-bottom));z-index:20}
+  .nav button{border:0;background:0;display:flex;flex-direction:column;align-items:center;gap:2px;
+              font-size:11px;color:var(--sub);padding:4px 14px;font-weight:600}
+  .nav button.on{color:var(--accent)}
+  .nav .ic{font-size:20px}
+
+  /* FAB */
+  .fab{position:fixed;bottom:78px;left:50%;transform:translateX(-50%);width:64px;height:64px;border-radius:50%;
+       background:linear-gradient(135deg,var(--accent),#ff7a63);color:#fff;border:0;font-size:34px;font-weight:300;
+       box-shadow:0 10px 24px rgba(255,120,90,.45);z-index:30;line-height:1}
+
+  /* シート */
+  .sheet-bg{position:fixed;inset:0;background:rgba(40,30,28,.38);z-index:40;display:none;opacity:0;transition:opacity .2s}
+  .sheet-bg.show{display:block;opacity:1}
+  .sheet{position:fixed;left:50%;transform:translateX(-50%) translateY(100%);bottom:0;width:100%;max-width:480px;
+         background:var(--bg);border-radius:24px 24px 0 0;z-index:41;padding:8px 18px 26px;transition:transform .28s cubic-bezier(.2,.8,.2,1);max-height:92vh;overflow:auto}
+  .sheet.show{transform:translateX(-50%) translateY(0)}
+  .grip{width:42px;height:5px;border-radius:99px;background:var(--line);margin:8px auto 14px}
+  .tabs{display:flex;gap:8px;margin-bottom:16px}
+  .tabs button{flex:1;border:1px solid var(--line);background:#fff;border-radius:14px;padding:12px 4px;font-weight:700;font-size:13px;color:var(--sub);display:flex;flex-direction:column;gap:4px;align-items:center}
+  .tabs button.on{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+  .tabs .ic{font-size:22px}
+  label{display:block;font-size:13px;font-weight:700;margin:14px 2px 6px;color:var(--sub)}
+  input,select{width:100%;border:1px solid var(--line);background:#fff;border-radius:14px;padding:13px 14px;font-size:16px;color:var(--ink);font-family:inherit}
+  .catpick{display:flex;flex-wrap:wrap;gap:8px}
+  .catpick button{border:1px solid var(--line);background:#fff;border-radius:12px;padding:9px 12px;font-size:13px;font-weight:700;color:var(--sub);display:flex;align-items:center;gap:5px}
+  .catpick button.on{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+  .btn{width:100%;border:0;background:linear-gradient(135deg,var(--accent),#ff7a63);color:#fff;border-radius:16px;padding:16px;font-size:16px;font-weight:800;margin-top:20px;box-shadow:0 8px 18px rgba(255,120,90,.35)}
+  .btn.ghost{background:#fff;color:var(--accent);border:1.5px solid var(--accent);box-shadow:none}
+  .mic{width:110px;height:110px;border-radius:50%;background:var(--accent-soft);color:var(--accent);border:0;font-size:44px;margin:10px auto;display:block}
+  .mic.live{animation:pulse 1s infinite;background:var(--accent);color:#fff}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(255,143,122,.5)}70%{box-shadow:0 0 0 22px rgba(255,143,122,0)}100%{box-shadow:0 0 0 0 rgba(255,143,122,0)}}
+  .heard{text-align:center;font-size:18px;font-weight:700;min-height:26px;margin:6px 0}
+  .engine{text-align:center;font-size:11px;color:var(--sub);margin-bottom:4px}
+  .note{background:var(--accent-soft);color:#a1533f;border-radius:14px;padding:12px 14px;font-size:13px;font-weight:600;line-height:1.7;margin:14px 0 10px}
+  .scan{background:#fff;border:2px dashed var(--line);border-radius:18px;padding:28px 16px;text-align:center;color:var(--sub)}
+  .scan .big{font-size:40px}
+  .parsed{background:#fff;border-radius:16px;padding:14px;margin-top:14px;border:1px solid var(--line)}
+  .parsed .ln{display:flex;justify-content:space-between;padding:6px 2px;font-size:14px}
+  .toast{position:fixed;bottom:150px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:12px 22px;border-radius:99px;font-weight:700;font-size:14px;z-index:60;opacity:0;transition:opacity .2s,bottom .2s;pointer-events:none}
+  .toast.show{opacity:1;bottom:160px}
+  .seg-small{display:flex;gap:6px;margin:6px 0 2px}
+  .seg-small button{flex:1;border:1px solid var(--line);background:#fff;border-radius:11px;padding:9px;font-weight:700;font-size:13px;color:var(--sub)}
+  .seg-small button.on{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+  .empty{text-align:center;color:var(--sub);padding:30px 10px;font-size:14px}
+</style>
+</head>
+<body>
+
+<!-- ホーム -->
+<section id="home" class="screen active">
+  <h1>やさしい家計簿</h1>
+  <div class="card total-card">
+    <div class="total-label" id="homeMonth">2026年7月の出費</div>
+    <div class="total-amt"><span class="yen">¥</span><span id="homeTotal">0</span></div>
+    <div id="homeVs" class="vs">先月比 —</div>
+  </div>
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <b style="font-size:15px">分類ごと</b><span class="muted" id="homeCount">0件</span>
+    </div>
+    <div id="homeCats"></div>
+  </div>
+</section>
+
+<!-- 履歴 -->
+<section id="log" class="screen">
+  <h1>履歴</h1>
+  <div class="seg-small" id="logMonths"></div>
+  <div class="card" id="logList"></div>
+</section>
+
+<!-- 分析 -->
+<section id="stat" class="screen">
+  <h1>分析</h1>
+  <div class="seg">
+    <button class="on" data-tab="cmp" onclick="statTab('cmp')">月の比較</button>
+    <button data-tab="year" onclick="statTab('year')">年間</button>
+    <button data-tab="sim" onclick="statTab('sim')">シミュ</button>
+  </div>
+  <div id="statBody"></div>
+</section>
+
+<!-- ボトムナビ -->
+<nav class="nav">
+  <button class="on" data-nav="home" onclick="go('home')"><span class="ic">🏠</span>ホーム</button>
+  <button data-nav="log" onclick="go('log')"><span class="ic">📋</span>履歴</button>
+  <button data-nav="stat" onclick="go('stat')"><span class="ic">📊</span>分析</button>
+</nav>
+<button class="fab" onclick="openSheet()">＋</button>
+
+<!-- 入力シート -->
+<div class="sheet-bg" id="sheetBg" onclick="closeSheet()"></div>
+<div class="sheet" id="sheet">
+  <div class="grip"></div>
+  <div class="tabs">
+    <button class="on" data-in="voice" onclick="inTab('voice')"><span class="ic">🎤</span>音声</button>
+    <button data-in="receipt" onclick="inTab('receipt')"><span class="ic">📷</span>レシート</button>
+    <button data-in="manual" onclick="inTab('manual')"><span class="ic">✏️</span>手入力</button>
+  </div>
+
+  <!-- 音声 -->
+  <div id="paneVoice">
+    <p class="muted" style="text-align:center">マイクを押して「消しゴム 100円」のように話す</p>
+    <button class="mic" id="micBtn" onclick="toggleMic()">🎤</button>
+    <div class="heard" id="heard"></div>
+    <div class="engine" id="engineTag"></div>
+    <div id="voiceParsed"></div>
+    <!-- 最終フォールバック：OS標準のキーボード音声入力（iPhoneのSiri式ディクテーション）に誘導 -->
+    <div id="dictWrap" style="display:none">
+      <div class="note" id="dictMsg"></div>
+      <input id="dictInput" placeholder="例）消しゴム 100円">
+      <button class="btn" onclick="useDict()">この内容で読み取る</button>
+    </div>
+  </div>
+
+  <!-- レシート -->
+  <div id="paneReceipt" style="display:none">
+    <label>レシートを撮影 / 選択</label>
+    <input type="file" accept="image/*" capture="environment" id="recFile" onchange="scanReceipt()" style="display:none">
+    <div class="scan" onclick="document.getElementById('recFile').click()">
+      <div class="big">📷</div>
+      <div style="margin-top:8px;font-weight:700">タップして撮影</div>
+      <div style="font-size:12px;margin-top:4px">合計金額を読み取り、分類を自動で推測します</div>
+    </div>
+    <div id="recParsed"></div>
+  </div>
+
+  <!-- 手入力 -->
+  <div id="paneManual" style="display:none">
+    <label>品名・内容</label>
+    <input id="mName" placeholder="例）消しゴム">
+    <label>金額（円）</label>
+    <input id="mAmt" type="number" inputmode="numeric" placeholder="100">
+    <label>分類</label>
+    <div class="catpick" id="mCatPick"></div>
+    <div id="mAloneWrap" style="display:none">
+      <label>だれと？（シミュレーション用）</label>
+      <div class="seg-small">
+        <button id="alone1" class="on" onclick="setAlone(true)">🙋 一人</button>
+        <button id="alone0" onclick="setAlone(false)">👥 複数</button>
+      </div>
+    </div>
+    <button class="btn" onclick="saveManual()">追加する</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ===== 分類マスタ ===== */
+const CATS = {
+  food:  {name:'食費',   emoji:'🍚', color:'var(--mint)'},
+  eatout:{name:'外食',   emoji:'🍜', color:'var(--rose)'},
+  daily: {name:'日用品', emoji:'🧴', color:'var(--sky)'},
+  fun:   {name:'遊び',   emoji:'🎮', color:'var(--lav)'},
+  trans: {name:'交通',   emoji:'🚃', color:'var(--lemon)'},
+  other: {name:'その他', emoji:'📦', color:'#c9beb8'},
+};
+/* 自動仕分けキーワード（レシート/音声の推測用） */
+const KW = [
+  ['eatout',['ラーメン','らーめん','カフェ','マック','マクド','スタバ','レストラン','居酒屋','定食','牛丼','寿司','ランチ','ディナー','焼肉','そば','うどん','丼']],
+  ['food',  ['スーパー','マート','米','肉','野菜','牛乳','卵','パン','弁当','惣菜','食品','青果','鮮魚']],
+  ['daily', ['洗剤','ティッシュ','トイレット','消しゴム','ノート','ペン','文具','シャンプー','歯','ドラッグ','薬局','日用']],
+  ['trans', ['電車','バス','ガソリン','タクシー','駐車','切符','suica','pasmo','高速']],
+  ['fun',   ['映画','ゲーム','本','漫画','カラオケ','ライブ','遊園地','課金','netflix','ゲーセn']],
+];
+function guessCat(text){
+  const t=(text||'').toLowerCase();
+  for(const [cat,words] of KW){ if(words.some(w=>t.includes(w.toLowerCase()))) return cat; }
+  return 'other';
+}
+
+/* ===== ストア ===== */
+const KEY='yasashi_kakeibo_v1';
+let DB = load();
+function load(){
+  try{const r=localStorage.getItem(KEY); if(r) return JSON.parse(r);}catch(e){}
+  return seed();
+}
+function save(){ localStorage.setItem(KEY, JSON.stringify(DB)); }
+function seed(){
+  const now=new Date();
+  const items=[];
+  let id=1;
+  function add(monthOffset,day,name,amount,cat,alone){
+    const d=new Date(now.getFullYear(), now.getMonth()-monthOffset, day);
+    items.push({id:id++, date:dstr(d), name, amount, cat, alone: alone===undefined?null:alone});
+  }
+  // 先月
+  add(1,3,'スーパーまるみ',4820,'food'); add(1,7,'ラーメン花',980,'eatout',true);
+  add(1,12,'洗剤・ティッシュ',1280,'daily'); add(1,15,'電車',560,'trans');
+  add(1,18,'焼肉 みんなで',6400,'eatout',false); add(1,22,'スーパー',3980,'food');
+  add(1,26,'映画',1900,'fun'); add(1,28,'カフェ',620,'eatout',true);
+  // 今月
+  add(0,2,'スーパーまるみ',5230,'food'); add(0,4,'マック',780,'eatout',true);
+  add(0,6,'消しゴム・ノート',430,'daily'); add(0,9,'ガソリン',4500,'trans');
+  add(0,11,'居酒屋 同僚と',3800,'eatout',false); add(0,14,'牛丼',560,'eatout',true);
+  add(0,16,'スーパー',4120,'food'); add(0,19,'ゲーム課金',1500,'fun');
+  return {items};
+}
+
+/* ===== 日付ユーティリティ（すべてローカル時刻で統一：UTC変換で月がズレるのを防ぐ） ===== */
+const now=new Date();
+function pad2(n){ return String(n).padStart(2,'0'); }
+function dstr(d){ return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
+function ymOf(d){ return d.getFullYear()+'-'+pad2(d.getMonth()+1); }
+function ym(s){ return s.slice(0,7); }
+function curYM(){ return ymOf(now); }
+function prevYM(){ return ymOf(new Date(now.getFullYear(),now.getMonth()-1,1)); }
+function ymLabel(s){ const [y,m]=s.split('-'); return `${+m}月`; }
+function itemsOf(ymStr){ return DB.items.filter(i=>ym(i.date)===ymStr); }
+function sumOf(arr){ return arr.reduce((a,b)=>a+b.amount,0); }
+function fmt(n){ return n.toLocaleString('ja-JP'); }
+
+/* ===== 画面遷移 ===== */
+function go(id){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('active',s.id===id));
+  document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('on',b.dataset.nav===id));
+  if(id==='home') renderHome();
+  if(id==='log') renderLog();
+  if(id==='stat') renderStat();
+  window.scrollTo(0,0);
+}
+
+/* ===== ホーム ===== */
+function renderHome(){
+  const cur=itemsOf(curYM()), prev=itemsOf(prevYM());
+  const tc=sumOf(cur), tp=sumOf(prev);
+  document.getElementById('homeMonth').textContent=`${now.getFullYear()}年${now.getMonth()+1}月の出費`;
+  document.getElementById('homeTotal').textContent=fmt(tc);
+  document.getElementById('homeCount').textContent=`${cur.length}件`;
+  const vs=document.getElementById('homeVs');
+  if(tp===0){ vs.textContent='先月比 —'; vs.className='vs'; }
+  else{
+    const diff=tc-tp, pct=Math.round(Math.abs(diff)/tp*100);
+    if(diff<=0){ vs.className='vs down'; vs.textContent=`▼ 先月より ¥${fmt(-diff)} 少ない (${pct}%減)`; }
+    else{ vs.className='vs'; vs.textContent=`▲ 先月より ¥${fmt(diff)} 多い (${pct}%増)`; }
+  }
+  // 分類集計
+  const by={};
+  for(const k in CATS) by[k]=0;
+  cur.forEach(i=>by[i.cat]+=i.amount);
+  const max=Math.max(1,...Object.values(by));
+  const box=document.getElementById('homeCats');
+  const rows=Object.keys(CATS).filter(k=>by[k]>0).sort((a,b)=>by[b]-by[a]);
+  if(rows.length===0){ box.innerHTML='<div class="empty">まだ記録がありません。＋から追加してね</div>'; return; }
+  box.innerHTML=rows.map(k=>{
+    const c=CATS[k], w=Math.round(by[k]/max*100);
+    return `<div class="cat-row">
+      <div class="cat-ic" style="background:${c.color}22">${c.emoji}</div>
+      <div class="cat-body">
+        <div class="cat-top"><span>${c.name}</span><b>¥${fmt(by[k])}</b></div>
+        <div class="bar"><span style="width:${w}%;background:${c.color}"></span></div>
+      </div></div>`;
+  }).join('');
+}
+
+/* ===== 履歴 ===== */
+let logYM=null;
+function renderLog(){
+  const months=[...new Set(DB.items.map(i=>ym(i.date)))].sort().reverse();
+  if(!logYM||!months.includes(logYM)) logYM=months[0]||curYM();
+  document.getElementById('logMonths').innerHTML=months.slice(0,4).map(m=>
+    `<button class="${m===logYM?'on':''}" onclick="logYM='${m}';renderLog()">${ymLabel(m)}</button>`).join('');
+  const arr=itemsOf(logYM).sort((a,b)=>b.date.localeCompare(a.date));
+  const list=document.getElementById('logList');
+  if(arr.length===0){ list.innerHTML='<div class="empty">この月の記録はありません</div>'; return; }
+  list.innerHTML=arr.map(i=>{
+    const c=CATS[i.cat];
+    const alone = i.cat==='eatout'&&i.alone!==null ? `<span class="chip">${i.alone?'🙋一人':'👥複数'}</span>`:'';
+    return `<div class="item" onclick="delItem(${i.id})">
+      <div class="cat-ic" style="background:${c.color}22">${c.emoji}</div>
+      <div class="nm"><div class="t">${esc(i.name)}${alone}</div><div class="d">${i.date.slice(5).replace('-','/')} ・ ${c.name}</div></div>
+      <div class="amt">¥${fmt(i.amount)}</div>
+    </div>`;
+  }).join('');
+}
+function delItem(id){
+  if(!confirm('この記録を削除しますか？')) return;
+  DB.items=DB.items.filter(i=>i.id!==id); save(); renderLog(); toast('削除しました');
+}
+
+/* ===== 分析 ===== */
+let curStatTab='cmp';
+function statTab(t){ curStatTab=t;
+  document.querySelectorAll('.seg button').forEach(b=>b.classList.toggle('on',b.dataset.tab===t));
+  renderStat();
+}
+function renderStat(){
+  document.querySelectorAll('.seg button').forEach(b=>b.classList.toggle('on',b.dataset.tab===curStatTab));
+  const body=document.getElementById('statBody');
+  if(curStatTab==='cmp') body.innerHTML=viewCompare();
+  else if(curStatTab==='year') body.innerHTML=viewYear();
+  else body.innerHTML=viewSim();
+}
+function viewCompare(){
+  const cur=itemsOf(curYM()), prev=itemsOf(prevYM());
+  const byC={},byP={};
+  for(const k in CATS){byC[k]=0;byP[k]=0;}
+  cur.forEach(i=>byC[i.cat]+=i.amount); prev.forEach(i=>byP[i.cat]+=i.amount);
+  const rows=Object.keys(CATS).filter(k=>byC[k]||byP[k]).map(k=>{
+    const c=CATS[k], d=byC[k]-byP[k];
+    const tag = d>0?`<span style="color:var(--accent)">+¥${fmt(d)}</span>`
+               :d<0?`<span style="color:var(--mint)">−¥${fmt(-d)}</span>`
+               :`<span class="muted">±0</span>`;
+    return `<div class="cat-row">
+      <div class="cat-ic" style="background:${c.color}22">${c.emoji}</div>
+      <div class="cat-body"><div class="cat-top"><span>${c.name}</span>${tag}</div>
+      <div class="muted" style="font-size:12px">今月 ¥${fmt(byC[k])} / 先月 ¥${fmt(byP[k])}</div></div></div>`;
+  }).join('');
+  return `<div class="card"><b style="font-size:15px">今月 vs 先月</b>
+    <div style="margin-top:10px">${rows||'<div class="empty">データがありません</div>'}</div></div>
+    ${aiCard()}`;
+}
+function viewYear(){
+  // 直近6ヶ月
+  const arr=[];
+  for(let i=5;i>=0;i--){ const d=new Date(now.getFullYear(),now.getMonth()-i,1);
+    const s=ymOf(d); arr.push({label:`${d.getMonth()+1}月`, total:sumOf(itemsOf(s))}); }
+  const max=Math.max(1,...arr.map(a=>a.total));
+  const yearTotal=arr.reduce((a,b)=>a+b.total,0);
+  const bars=arr.map(a=>`<div class="mbar">
+     <div class="lb">¥${a.total?Math.round(a.total/1000)+'k':'0'}</div>
+     <div class="col" style="height:${Math.max(4,a.total/max*90)}%"></div>
+     <div class="lb">${a.label}</div></div>`).join('');
+  const avg=Math.round(yearTotal/6);
+  return `<div class="card"><b style="font-size:15px">直近6ヶ月の推移</b>
+    <div class="mbars">${bars}</div></div>
+    <div class="card" style="display:flex;justify-content:space-around;text-align:center">
+      <div><div class="muted">6ヶ月合計</div><b style="font-size:20px">¥${fmt(yearTotal)}</b></div>
+      <div><div class="muted">月平均</div><b style="font-size:20px">¥${fmt(avg)}</b></div>
+    </div>`;
+}
+function viewSim(){
+  const cur=itemsOf(curYM());
+  const out=cur.filter(i=>i.cat==='eatout');
+  const cnt=out.length, alone=out.filter(i=>i.alone===true).length, withppl=out.filter(i=>i.alone===false).length;
+  const spent=sumOf(out);
+  const avg = cnt? Math.round(spent/cnt):0;
+  const yearProj = spent*12;
+  return `<div class="sim">
+      <div class="muted">今月の外食レポート</div>
+      <div style="margin:10px 0;font-size:15px;line-height:1.9">
+        🍜 外食は <b>${cnt}回</b>（🙋一人 ${alone}回 / 👥複数 ${withppl}回）<br>
+        💰 使った額 <b>¥${fmt(spent)}</b> ・ 1回あたり <b>¥${fmt(avg)}</b>
+      </div>
+      <div class="muted" style="margin-top:6px">このペースが1年続くと…</div>
+      <div class="big">外食だけで 年 ¥${fmt(yearProj)}</div>
+      ${alone>0?`<div class="muted" style="margin-top:8px">一人外食を月${alone}回 → 家で食べると年 約¥${fmt(alone*avg*12)} の節約余地</div>`:''}
+    </div>
+    ${aiCard()}`;
+}
+function aiCard(){
+  return `<div class="card">
+    <b style="font-size:15px">AIに相談する 🤖</b>
+    <p class="muted" style="margin:6px 0 0">今月のデータをコピーして、ChatGPTやClaudeに貼るだけ。「節約アドバイスして」と聞けます。</p>
+    <button class="btn ghost" onclick="copyForAI()">📋 今月の家計をコピー</button>
+  </div>`;
+}
+function copyForAI(){
+  const cur=itemsOf(curYM());
+  const by={}; for(const k in CATS) by[k]=0; cur.forEach(i=>by[i.cat]+=i.amount);
+  let t=`【${now.getFullYear()}年${now.getMonth()+1}月の家計簿】\n合計 ¥${fmt(sumOf(cur))}\n`;
+  for(const k in CATS) if(by[k]) t+=`・${CATS[k].name}：¥${fmt(by[k])}\n`;
+  t+=`\nこの家計を見て、節約できそうなポイントを3つ、やさしくアドバイスしてください。`;
+  navigator.clipboard?.writeText(t).then(()=>toast('コピーしました！AIに貼ってね'),()=>fallbackCopy(t));
+}
+function fallbackCopy(t){ prompt('コピーしてAIに貼ってください',t); }
+
+/* ===== 入力シート ===== */
+function openSheet(){ inTab('voice'); document.getElementById('sheetBg').classList.add('show');
+  document.getElementById('sheet').classList.add('show'); }
+function closeSheet(){ stopMic(); document.getElementById('sheetBg').classList.remove('show');
+  document.getElementById('sheet').classList.remove('show'); }
+function inTab(t){
+  document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.in===t));
+  document.getElementById('paneVoice').style.display=t==='voice'?'':'none';
+  document.getElementById('paneReceipt').style.display=t==='receipt'?'':'none';
+  document.getElementById('paneManual').style.display=t==='manual'?'':'none';
+  if(t==='manual') buildCatPick();
+  if(t==='voice'){ setHeard(''); document.getElementById('voiceParsed').innerHTML='';
+    document.getElementById('dictWrap').style.display='none'; showEngine(); }
+  if(t==='receipt'){ document.getElementById('recParsed').innerHTML=''; }
+}
+
+/* ---- 手入力 ---- */
+let mCat='food', mAlone=true;
+function buildCatPick(){
+  document.getElementById('mCatPick').innerHTML=Object.keys(CATS).map(k=>
+    `<button class="${k===mCat?'on':''}" onclick="pickCat('${k}')">${CATS[k].emoji} ${CATS[k].name}</button>`).join('');
+  document.getElementById('mAloneWrap').style.display=mCat==='eatout'?'':'none';
+}
+function pickCat(k){ mCat=k; buildCatPick(); }
+function setAlone(v){ mAlone=v;
+  document.getElementById('alone1').classList.toggle('on',v);
+  document.getElementById('alone0').classList.toggle('on',!v); }
+function saveManual(){
+  const name=document.getElementById('mName').value.trim()||CATS[mCat].name;
+  const amt=parseInt(document.getElementById('mAmt').value,10);
+  if(!amt||amt<=0){ toast('金額を入れてね'); return; }
+  addItem(name,amt,mCat, mCat==='eatout'?mAlone:null);
+  document.getElementById('mName').value=''; document.getElementById('mAmt').value='';
+  closeSheet(); toast('追加しました ✓');
+}
+
+/* ---- 共通追加 ---- */
+function addItem(name,amount,cat,alone){
+  const id=Math.max(0,...DB.items.map(i=>i.id))+1;
+  DB.items.push({id, date:dstr(now), name, amount, cat, alone: alone===undefined?null:alone});
+  save(); go('home');
+}
+
+/* ===== 音声入力：どのスマホでも喋れるように3段構え =====
+   1段目 iPhone  → Appleの音声認識（Siri・キーボード音声と同じエンジン）
+   2段目 Android → Googleの音声認識
+   3段目 どちらも不可 → OS標準キーボードの🎤（ディクテーション）へ誘導
+   入口は同じWeb Speech APIだが、端末ごとにクセが違うので設定と保険を出し分ける */
+const UA = navigator.userAgent||'';
+const IS_IOS = /iPad|iPhone|iPod/.test(UA) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
+const IS_ANDROID = /Android/.test(UA);
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+const VOICE = IS_IOS ? {
+    label:'🍎 Apple音声認識（Siriと同じエンジン）',
+    interim:false,  // iOSは途中経過が不安定なので切る
+    prime:true,     // 先にマイク許可を確定させてから起動（iOSの空振り対策）
+    guardMs:7000    // onendが返ってこない事故に備えた保険タイマー
+  } : IS_ANDROID ? {
+    label:'🤖 Google音声認識', interim:true, prime:false, guardMs:9000
+  } : {
+    label:'💻 ブラウザ標準の音声認識', interim:true, prime:false, guardMs:9000
+  };
+
+let rec=null, listening=false, guardT=null, finalTxt='';
+
+function showEngine(){
+  document.getElementById('engineTag').textContent =
+    SR ? `使用中：${VOICE.label}` : '⌨️ この端末はキーボードの🎤で入力します';
+}
+function setHeard(t){ document.getElementById('heard').textContent=t; }
+function toggleMic(){ listening ? stopMic() : startMic(); }
+
+async function startMic(){
+  if(!SR){ dictMode('この端末はアプリからの音声起動に対応していません。'); return; }
+  finalTxt='';
+  document.getElementById('voiceParsed').innerHTML='';
+  document.getElementById('dictWrap').style.display='none';
+  // iPhone対策：先にマイク許可を取ってから認識を始めると空振りしにくい
+  if(VOICE.prime && navigator.mediaDevices && navigator.mediaDevices.getUserMedia){
+    try{
+      const s=await navigator.mediaDevices.getUserMedia({audio:true});
+      s.getTracks().forEach(t=>t.stop());
+    }catch(e){ dictMode('マイクの使用が許可されませんでした。'); return; }
+  }
+  try{ rec=new SR(); }catch(e){ dictMode('音声エンジンを起動できませんでした。'); return; }
+  rec.lang='ja-JP'; rec.interimResults=VOICE.interim; rec.continuous=false; rec.maxAlternatives=1;
+  listening=true;
+  document.getElementById('micBtn').classList.add('live');
+  setHeard('聞いています…');
+
+  rec.onresult=e=>{
+    let interim='';
+    // resultIndex から読む＝iOSで同じ言葉が二重に積まれるのを防ぐ
+    for(let i=e.resultIndex; i<e.results.length; i++){
+      const r=e.results[i];
+      if(r.isFinal) finalTxt+=r[0].transcript; else interim+=r[0].transcript;
+    }
+    setHeard((finalTxt+interim) || '聞いています…');
+    resetGuard();
+    if(finalTxt) finishMic();
+  };
+  rec.onerror=e=>{
+    const err=e&&e.error;
+    if(err==='not-allowed'||err==='service-not-allowed') dictMode('マイクが許可されていません。');
+    else if(err==='no-speech'){ stopMic(); setHeard('聞き取れませんでした。もう一度どうぞ'); }
+    else dictMode('音声認識がうまく動きませんでした。');
+  };
+  rec.onend=()=>{ if(listening) finishMic(); };
+
+  try{ rec.start(); }catch(e){ dictMode('音声エンジンを起動できませんでした。'); return; }
+  resetGuard();
+}
+function resetGuard(){
+  clearTimeout(guardT);
+  guardT=setTimeout(()=>{ if(listening) finishMic(); }, VOICE.guardMs);
+}
+function finishMic(){
+  const t=finalTxt.trim();
+  stopMic();
+  if(t) parseVoice(t);
+  else { setHeard('聞き取れませんでした'); dictMode('うまく拾えないときは、こちらでどうぞ。'); }
+}
+function stopMic(){
+  listening=false; clearTimeout(guardT);
+  try{ rec && rec.stop(); }catch(e){}
+  const b=document.getElementById('micBtn'); if(b) b.classList.remove('live');
+}
+
+/* 3段目：OS標準キーボードの🎤に誘導（iPhoneならSiri式ディクテーションがここで使える） */
+function dictMode(msg){
+  stopMic();
+  document.getElementById('dictMsg').textContent = msg+'下の枠をタップして、キーボードの 🎤 で話してください。';
+  document.getElementById('dictWrap').style.display='';
+  document.getElementById('dictInput').focus();
+}
+function useDict(){
+  const t=document.getElementById('dictInput').value.trim();
+  if(!t){ toast('内容を入れてね'); return; }
+  setHeard(t);
+  document.getElementById('dictInput').value='';
+  document.getElementById('dictWrap').style.display='none';
+  parseVoice(t);
+}
+
+/* 聞き取った文から「品名」と「金額」を取り出す */
+function parseVoice(text){
+  setHeard(text);
+  // 全角数字→半角、カンマ除去。「100円」「千円」ではなく数字表記を想定
+  const norm=text.replace(/[０-９]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0)).replace(/,/g,'');
+  const m=norm.match(/(\d+)\s*(?:円|えん)?/);
+  const amt=m?parseInt(m[1],10):0;
+  let name=norm.replace(/(\d+)\s*(?:円|えん)?/,'').replace(/[をがはにでのと、。\s]/g,'').trim();
+  if(!name) name='買い物';
+  showParsed('voiceParsed', name, amt, guessCat(text));
+}
+
+/* ---- レシート撮影（モック：合計＋分類を推測して確認） ---- */
+function scanReceipt(){
+  const box=document.getElementById('recParsed');
+  box.innerHTML='<div class="scan"><div class="big">🔍</div><div style="margin-top:8px">読み取り中…</div></div>';
+  // 実機ではここでOCR。モックはそれっぽい結果を生成
+  setTimeout(()=>{
+    const shops=[['スーパーまるみ',4820,'food'],['ドラッグ薬局',1680,'daily'],['ラーメン花',980,'eatout'],['コンビニ',540,'food']];
+    const pick=shops[Math.floor(Math.random()*shops.length)];
+    showParsed('recParsed', pick[0], pick[1], pick[2], true);
+  },900);
+}
+
+/* ---- 読み取り結果の確認カード（分類を直せる） ---- */
+let pName='',pAmt=0,pCat='other',pAlone=true;
+function showParsed(target,name,amt,cat,fromReceipt){
+  pName=name; pAmt=amt; pCat=cat; pAlone=true;
+  const el=document.getElementById(target);
+  el.innerHTML=`<div class="parsed">
+      <div class="ln"><span>内容</span><b>${esc(name)}</b></div>
+      <div class="ln"><span>金額</span><b>¥${fmt(amt)}</b></div>
+      <div class="ln"><span>分類（推測・変更可）</span></div>
+      <div class="catpick" id="pCatPick" style="margin-top:6px"></div>
+      <div id="pAloneWrap" style="margin-top:10px;display:none">
+        <div class="muted" style="font-size:13px;font-weight:700">だれと？</div>
+        <div class="seg-small" style="margin-top:6px">
+          <button id="pAlone1" class="on" onclick="pSetAlone(true)">🙋 一人</button>
+          <button id="pAlone0" onclick="pSetAlone(false)">👥 複数</button></div>
+      </div>
+      <button class="btn" onclick="confirmParsed()">この内容で追加</button>
+    </div>`;
+  renderPCat();
+}
+function renderPCat(){
+  document.getElementById('pCatPick').innerHTML=Object.keys(CATS).map(k=>
+    `<button class="${k===pCat?'on':''}" onclick="pPick('${k}')">${CATS[k].emoji} ${CATS[k].name}</button>`).join('');
+  document.getElementById('pAloneWrap').style.display=pCat==='eatout'?'':'none';
+}
+function pPick(k){ pCat=k; renderPCat(); }
+function pSetAlone(v){ pAlone=v;
+  document.getElementById('pAlone1').classList.toggle('on',v);
+  document.getElementById('pAlone0').classList.toggle('on',!v); }
+function confirmParsed(){
+  if(!pAmt){ toast('金額が読めませんでした'); return; }
+  addItem(pName,pAmt,pCat, pCat==='eatout'?pAlone:null);
+  closeSheet(); toast('追加しました ✓');
+}
+
+/* ===== 小物 ===== */
+function esc(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+let toastT;
+function toast(msg){ const el=document.getElementById('toast'); el.textContent=msg; el.classList.add('show');
+  clearTimeout(toastT); toastT=setTimeout(()=>el.classList.remove('show'),1800); }
+
+/* 起動 */
+renderHome();
+showEngine();
+</script>
+</body>
+</html>
