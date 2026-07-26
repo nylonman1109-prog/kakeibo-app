@@ -102,6 +102,7 @@
   @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(255,143,122,.5)}70%{box-shadow:0 0 0 22px rgba(255,143,122,0)}100%{box-shadow:0 0 0 0 rgba(255,143,122,0)}}
   .heard{text-align:center;font-size:18px;font-weight:700;min-height:26px;margin:6px 0}
   .engine{text-align:center;font-size:11px;color:var(--sub);margin-bottom:4px}
+  .linkbtn{border:0;background:0;color:var(--sub);font-size:12px;font-weight:700;text-decoration:underline;padding:6px;font-family:inherit}
   .note{background:var(--accent-soft);color:#a1533f;border-radius:14px;padding:12px 14px;font-size:13px;font-weight:600;line-height:1.7;margin:14px 0 10px}
   .scan{background:#fff;border:2px dashed var(--line);border-radius:18px;padding:28px 16px;text-align:center;color:var(--sub)}
   .scan .big{font-size:40px}
@@ -175,6 +176,7 @@
     <button class="mic" id="micBtn" onclick="toggleMic()">🎤</button>
     <div class="heard" id="heard"></div>
     <div class="engine" id="engineTag"></div>
+    <div style="text-align:center"><button class="linkbtn" onclick="dictMode('')">うまく反応しないときはこちら ⌨️</button></div>
     <div id="voiceParsed"></div>
     <!-- 最終フォールバック：OS標準のキーボード音声入力（iPhoneのSiri式ディクテーション）に誘導 -->
     <div id="dictWrap" style="display:none">
@@ -271,13 +273,14 @@ function seed(){
 }
 
 /* ===== 日付ユーティリティ（すべてローカル時刻で統一：UTC変換で月がズレるのを防ぐ） ===== */
-const now=new Date();
+/* 現在時刻は「その都度」取り直す。開きっぱなしで日付や月をまたいでも正しく切り替わる */
+function NOW(){ return new Date(); }
 function pad2(n){ return String(n).padStart(2,'0'); }
 function dstr(d){ return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
 function ymOf(d){ return d.getFullYear()+'-'+pad2(d.getMonth()+1); }
 function ym(s){ return s.slice(0,7); }
-function curYM(){ return ymOf(now); }
-function prevYM(){ return ymOf(new Date(now.getFullYear(),now.getMonth()-1,1)); }
+function curYM(){ return ymOf(NOW()); }
+function prevYM(){ const n=NOW(); return ymOf(new Date(n.getFullYear(),n.getMonth()-1,1)); }
 function ymLabel(s){ const [y,m]=s.split('-'); return `${+m}月`; }
 function itemsOf(ymStr){ return DB.items.filter(i=>ym(i.date)===ymStr); }
 function sumOf(arr){ return arr.reduce((a,b)=>a+b.amount,0); }
@@ -297,7 +300,8 @@ function go(id){
 function renderHome(){
   const cur=itemsOf(curYM()), prev=itemsOf(prevYM());
   const tc=sumOf(cur), tp=sumOf(prev);
-  document.getElementById('homeMonth').textContent=`${now.getFullYear()}年${now.getMonth()+1}月の出費`;
+  const n=NOW();
+  document.getElementById('homeMonth').textContent=`${n.getFullYear()}年${n.getMonth()+1}月の出費`;
   document.getElementById('homeTotal').textContent=fmt(tc);
   document.getElementById('homeCount').textContent=`${cur.length}件`;
   const vs=document.getElementById('homeVs');
@@ -386,7 +390,8 @@ function viewCompare(){
 function viewYear(){
   // 直近6ヶ月
   const arr=[];
-  for(let i=5;i>=0;i--){ const d=new Date(now.getFullYear(),now.getMonth()-i,1);
+  const n0=NOW();
+  for(let i=5;i>=0;i--){ const d=new Date(n0.getFullYear(),n0.getMonth()-i,1);
     const s=ymOf(d); arr.push({label:`${d.getMonth()+1}月`, total:sumOf(itemsOf(s))}); }
   const max=Math.max(1,...arr.map(a=>a.total));
   const yearTotal=arr.reduce((a,b)=>a+b.total,0);
@@ -431,7 +436,8 @@ function aiCard(){
 function copyForAI(){
   const cur=itemsOf(curYM());
   const by={}; for(const k in CATS) by[k]=0; cur.forEach(i=>by[i.cat]+=i.amount);
-  let t=`【${now.getFullYear()}年${now.getMonth()+1}月の家計簿】\n合計 ¥${fmt(sumOf(cur))}\n`;
+  const n=NOW();
+  let t=`【${n.getFullYear()}年${n.getMonth()+1}月の家計簿】\n合計 ¥${fmt(sumOf(cur))}\n`;
   for(const k in CATS) if(by[k]) t+=`・${CATS[k].name}：¥${fmt(by[k])}\n`;
   t+=`\nこの家計を見て、節約できそうなポイントを3つ、やさしくアドバイスしてください。`;
   navigator.clipboard?.writeText(t).then(()=>toast('コピーしました！AIに貼ってね'),()=>fallbackCopy(t));
@@ -477,7 +483,7 @@ function saveManual(){
 /* ---- 共通追加 ---- */
 function addItem(name,amount,cat,alone){
   const id=Math.max(0,...DB.items.map(i=>i.id))+1;
-  DB.items.push({id, date:dstr(now), name, amount, cat, alone: alone===undefined?null:alone});
+  DB.items.push({id, date:dstr(NOW()), name, amount, cat, alone: alone===undefined?null:alone});
   save(); go('home');
 }
 
@@ -494,15 +500,15 @@ const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 const VOICE = IS_IOS ? {
     label:'🍎 Apple音声認識（Siriと同じエンジン）',
     interim:false,  // iOSは途中経過が不安定なので切る
-    prime:true,     // 先にマイク許可を確定させてから起動（iOSの空振り対策）
-    guardMs:7000    // onendが返ってこない事故に備えた保険タイマー
+    guardMs:8000    // onendが返ってこない事故に備えた保険タイマー
   } : IS_ANDROID ? {
-    label:'🤖 Google音声認識', interim:true, prime:false, guardMs:9000
+    label:'🤖 Google音声認識', interim:true, guardMs:9000
   } : {
-    label:'💻 ブラウザ標準の音声認識', interim:true, prime:false, guardMs:9000
+    label:'💻 ブラウザ標準の音声認識', interim:true, guardMs:9000
   };
 
 let rec=null, listening=false, guardT=null, finalTxt='';
+let gotResult=false, gotAudio=false, lastErr='';
 
 function showEngine(){
   document.getElementById('engineTag').textContent =
@@ -511,25 +517,22 @@ function showEngine(){
 function setHeard(t){ document.getElementById('heard').textContent=t; }
 function toggleMic(){ listening ? stopMic() : startMic(); }
 
-async function startMic(){
+/* ★重要★ この関数は async にしないこと。
+   iOS Safari は「タップした流れが途切れずに」start() が呼ばれた時だけ音声を許可する。
+   await を挟むとユーザー操作の文脈が切れ、無反応のまま終わる（実機で発生した不具合）。 */
+function startMic(){
   if(!SR){ dictMode('この端末はアプリからの音声起動に対応していません。'); return; }
-  finalTxt='';
+  finalTxt=''; gotResult=false;
   document.getElementById('voiceParsed').innerHTML='';
   document.getElementById('dictWrap').style.display='none';
-  // iPhone対策：先にマイク許可を取ってから認識を始めると空振りしにくい
-  if(VOICE.prime && navigator.mediaDevices && navigator.mediaDevices.getUserMedia){
-    try{
-      const s=await navigator.mediaDevices.getUserMedia({audio:true});
-      s.getTracks().forEach(t=>t.stop());
-    }catch(e){ dictMode('マイクの使用が許可されませんでした。'); return; }
-  }
+
   try{ rec=new SR(); }catch(e){ dictMode('音声エンジンを起動できませんでした。'); return; }
   rec.lang='ja-JP'; rec.interimResults=VOICE.interim; rec.continuous=false; rec.maxAlternatives=1;
-  listening=true;
-  document.getElementById('micBtn').classList.add('live');
-  setHeard('聞いています…');
 
+  rec.onstart=()=>{ setHeard('聞いています…'); };
+  rec.onaudiostart=()=>{ gotAudio=true; };
   rec.onresult=e=>{
+    gotResult=true;
     let interim='';
     // resultIndex から読む＝iOSで同じ言葉が二重に積まれるのを防ぐ
     for(let i=e.resultIndex; i<e.results.length; i++){
@@ -541,14 +544,29 @@ async function startMic(){
     if(finalTxt) finishMic();
   };
   rec.onerror=e=>{
-    const err=e&&e.error;
-    if(err==='not-allowed'||err==='service-not-allowed') dictMode('マイクが許可されていません。');
-    else if(err==='no-speech'){ stopMic(); setHeard('聞き取れませんでした。もう一度どうぞ'); }
-    else dictMode('音声認識がうまく動きませんでした。');
+    const err=(e&&e.error)||'unknown';
+    lastErr=err;
+    if(err==='not-allowed'||err==='service-not-allowed'){
+      dictMode('マイクが許可されていません。端末の設定でこのサイトのマイクを許可してください。');
+    }else if(err==='no-speech'){
+      stopMic(); setHeard('聞き取れませんでした。もう一度どうぞ');
+    }else if(err==='network'){
+      dictMode('音声認識サーバーに接続できませんでした（通信環境をご確認ください）。');
+    }else if(err==='aborted'){
+      stopMic();
+    }else{
+      dictMode('音声認識を利用できませんでした（'+err+'）。');
+    }
   };
   rec.onend=()=>{ if(listening) finishMic(); };
 
-  try{ rec.start(); }catch(e){ dictMode('音声エンジンを起動できませんでした。'); return; }
+  // start() は同期的に。ここで例外＝この端末では起動不可
+  try{ rec.start(); }
+  catch(e){ dictMode('音声エンジンを起動できませんでした。'); return; }
+
+  listening=true;
+  document.getElementById('micBtn').classList.add('live');
+  setHeard('聞いています…');
   resetGuard();
 }
 function resetGuard(){
@@ -558,8 +576,11 @@ function resetGuard(){
 function finishMic(){
   const t=finalTxt.trim();
   stopMic();
-  if(t) parseVoice(t);
-  else { setHeard('聞き取れませんでした'); dictMode('うまく拾えないときは、こちらでどうぞ。'); }
+  if(t){ parseVoice(t); return; }
+  setHeard('聞き取れませんでした');
+  // なぜ拾えなかったかで案内を変える
+  if(!gotAudio && !gotResult) dictMode('マイクが反応しませんでした。');
+  else dictMode('うまく聞き取れませんでした。');
 }
 function stopMic(){
   listening=false; clearTimeout(guardT);
@@ -570,7 +591,7 @@ function stopMic(){
 /* 3段目：OS標準キーボードの🎤に誘導（iPhoneならSiri式ディクテーションがここで使える） */
 function dictMode(msg){
   stopMic();
-  document.getElementById('dictMsg').textContent = msg+'下の枠をタップして、キーボードの 🎤 で話してください。';
+  document.getElementById('dictMsg').textContent = (msg||'')+'下の枠をタップして、キーボードの 🎤 で話してください。';
   document.getElementById('dictWrap').style.display='';
   document.getElementById('dictInput').focus();
 }
@@ -651,6 +672,19 @@ function toast(msg){ const el=document.getElementById('toast'); el.textContent=m
 /* 起動 */
 renderHome();
 showEngine();
+
+/* アプリを開きっぱなしにしていても、復帰時に日付を取り直して表示を更新する
+   （例：7/31の夜に開いたまま8/1に戻ってくると「8月の出費」に切り替わる） */
+let lastYM=curYM();
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState!=='visible') return;
+  const nowYM=curYM();
+  const changed = nowYM!==lastYM;
+  lastYM=nowYM;
+  const act=document.querySelector('.screen.active');
+  if(changed && act && act.id!=='home'){ go('home'); toast(`${+nowYM.slice(5)}月になりました`); return; }
+  if(act){ go(act.id); }
+});
 </script>
 </body>
 </html>
