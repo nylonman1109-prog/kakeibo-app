@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>マイク診断</title>
+<style>
+  body{font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic UI",sans-serif;
+       background:#fbf7f4;color:#3a3330;margin:0;padding:18px;max-width:480px;margin:0 auto;line-height:1.6}
+  h1{font-size:19px;margin:6px 0 4px}
+  .lead{font-size:13px;color:#9a8f89;margin:0 0 16px}
+  .card{background:#fff;border-radius:16px;padding:14px 16px;margin-bottom:12px;box-shadow:0 4px 14px rgba(180,150,140,.12)}
+  .row{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid #efe7e1;font-size:14px}
+  .row:last-child{border-bottom:0}
+  .row b{text-align:right;word-break:break-all}
+  .ok{color:#3d9e75;font-weight:800}
+  .ng{color:#e0553c;font-weight:800}
+  .warn{color:#d59320;font-weight:800}
+  button{width:100%;border:0;border-radius:14px;padding:15px;font-size:16px;font-weight:800;
+         background:linear-gradient(135deg,#ff8f7a,#ff7a63);color:#fff;margin-top:8px}
+  button.sub{background:#fff;color:#ff7a63;border:1.5px solid #ff8f7a}
+  #log{background:#2f2a27;color:#d8f5c8;border-radius:14px;padding:12px;font-size:12px;
+       font-family:ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-all;
+       min-height:90px;max-height:260px;overflow:auto;line-height:1.5}
+  .verdict{border-radius:16px;padding:14px 16px;font-size:14px;font-weight:700;margin-bottom:12px}
+  .v-ng{background:#ffe6df;color:#b04a33}
+  .v-ok{background:#e5f5ee;color:#2f7d5c}
+  .hint{font-size:13px;color:#7a706b;margin-top:8px}
+</style>
+</head>
+<body>
+<h1>🎤 マイク診断</h1>
+<p class="lead">この端末で音声入力が使えるかを調べます。結果をそのまま送ってください。</p>
+
+<div id="verdict"></div>
+
+<div class="card" id="env"></div>
+
+<div class="card">
+  <b style="font-size:15px">実際に試す</b>
+  <p class="hint" style="margin-top:4px">押して「消しゴム100円」と話してください。</p>
+  <button onclick="test()">🎤 マイクを試す</button>
+  <button class="sub" onclick="copyAll()">📋 診断結果をコピー</button>
+</div>
+
+<div id="log">（ここに動作の記録が出ます）</div>
+
+<script>
+const UA=navigator.userAgent;
+const IS_IOS=/iPad|iPhone|iPod/.test(UA)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+const IS_ANDROID=/Android/.test(UA);
+// iOSでは Chrome=CriOS / Firefox=FxiOS / Edge=EdgiOS。これらは音声APIが使えない
+const IOS_OTHER=/CriOS|FxiOS|EdgiOS|OPiOS/.test(UA);
+const IOS_BROWSER=/CriOS/.test(UA)?'Chrome':/FxiOS/.test(UA)?'Firefox':/EdgiOS/.test(UA)?'Edge':/OPiOS/.test(UA)?'Opera':'Safari';
+const STANDALONE=window.navigator.standalone===true||window.matchMedia('(display-mode: standalone)').matches;
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+const SECURE=window.isSecureContext;
+
+const rows=[
+  ['端末', IS_IOS?'iPhone / iPad':IS_ANDROID?'Android':'パソコン等'],
+  ['ブラウザ', IS_IOS?IOS_BROWSER:(/Chrome/.test(UA)?'Chrome':/Firefox/.test(UA)?'Firefox':'その他')],
+  ['ホーム画面から起動', STANDALONE?'はい':'いいえ（ブラウザで表示）'],
+  ['音声API', SR?'あり':'なし'],
+  ['HTTPS', SECURE?'OK':'NG'],
+];
+document.getElementById('env').innerHTML=rows.map(r=>{
+  let cls='';
+  if(r[0]==='音声API') cls=SR?'ok':'ng';
+  if(r[0]==='HTTPS') cls=SECURE?'ok':'ng';
+  if(r[0]==='ホーム画面から起動'&&IS_IOS&&STANDALONE) cls='ng';
+  if(r[0]==='ブラウザ'&&IS_IOS&&IOS_OTHER) cls='ng';
+  return `<div class="row"><span>${r[0]}</span><b class="${cls}">${r[1]}</b></div>`;
+}).join('')+`<div class="row"><span>UA</span><b style="font-size:10px;color:#9a8f89">${UA}</b></div>`;
+
+/* 判定：この端末で音声が使えない決定的な理由があるか */
+let verdict='', vclass='v-ok';
+if(IS_IOS&&IOS_OTHER){
+  vclass='v-ng';
+  verdict=`❌ 原因が判明：iPhoneの${IOS_BROWSER}では音声入力が使えません。<br><br>
+    Appleの制限で、iPhoneでは<b>Safari以外のブラウザは音声認識を使えない</b>仕様です。<br>
+    <b>→ Safariで開き直してください。</b>`;
+}else if(IS_IOS&&STANDALONE){
+  vclass='v-ng';
+  verdict=`❌ 原因が判明：ホーム画面のアイコンから起動しています。<br><br>
+    iPhoneでは<b>ホーム画面に追加したアプリだと音声認識が動かない</b>既知の不具合があります。<br>
+    <b>→ Safariで直接URLを開いてください。</b>`;
+}else if(!SR){
+  vclass='v-ng';
+  verdict=`❌ このブラウザには音声認識機能がありません。`;
+}else if(!SECURE){
+  vclass='v-ng';
+  verdict=`❌ HTTPSでないため、マイクが使えません。`;
+}else{
+  verdict=`✅ 条件は満たしています。下のボタンで実際に試してください。`;
+}
+document.getElementById('verdict').innerHTML=`<div class="verdict ${vclass}">${verdict}</div>`;
+
+/* ログ */
+const L=[];
+function log(s){ L.push(s); document.getElementById('log').textContent=L.join('\n');
+  document.getElementById('log').scrollTop=9999; }
+log('診断開始 '+new Date().toLocaleTimeString('ja-JP'));
+
+/* マイク許可の状態（対応端末のみ） */
+if(navigator.permissions&&navigator.permissions.query){
+  navigator.permissions.query({name:'microphone'}).then(p=>log('マイク許可の状態: '+p.state))
+    .catch(()=>log('マイク許可の状態: 取得できず（この端末では非対応）'));
+}
+
+let rec=null;
+function test(){
+  if(!SR){ log('✗ 音声APIがありません'); return; }
+  log('--- テスト開始 ---');
+  try{ rec=new SR(); }catch(e){ log('✗ 生成失敗: '+e.message); return; }
+  rec.lang='ja-JP'; rec.continuous=false; rec.interimResults=false; rec.maxAlternatives=1;
+  rec.onstart=()=>log('● start（起動した）');
+  rec.onaudiostart=()=>log('● audiostart（マイクが開いた）');
+  rec.onspeechstart=()=>log('● speechstart（声を検知）');
+  rec.onspeechend=()=>log('● speechend（声が終わった）');
+  rec.onaudioend=()=>log('● audioend（マイクを閉じた）');
+  rec.onresult=e=>{
+    let t=''; for(let i=0;i<e.results.length;i++) t+=e.results[i][0].transcript;
+    log('★ 聞き取り成功: 「'+t+'」');
+  };
+  rec.onnomatch=()=>log('△ nomatch（音は拾ったが言葉にできず）');
+  rec.onerror=e=>log('✗ エラー: '+(e.error||'unknown')+(e.message?' / '+e.message:''));
+  rec.onend=()=>log('● end（終了）');
+  try{ rec.start(); log('start() を呼びました'); }
+  catch(e){ log('✗ start() 例外: '+e.message); }
+  setTimeout(()=>{ try{rec.stop()}catch(e){} },10000);
+}
+
+function copyAll(){
+  const t='【マイク診断】\n'+rows.map(r=>r[0]+': '+r[1]).join('\n')
+    +'\nUA: '+UA+'\n\n【動作ログ】\n'+L.join('\n');
+  navigator.clipboard?.writeText(t).then(()=>alert('コピーしました。そのまま貼って送ってください。'),
+    ()=>prompt('これをコピーして送ってください',t));
+}
+</script>
+</body>
+</html>

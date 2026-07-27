@@ -497,6 +497,19 @@ const IS_IOS = /iPad|iPhone|iPod/.test(UA) || (navigator.platform==='MacIntel' &
 const IS_ANDROID = /Android/.test(UA);
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 
+/* iPhoneで音声が使えなくなる2大要因（どちらもAppleの制限・既知の不具合）
+   ① Safari以外のブラウザ（Chrome=CriOS等）→ 音声APIが提供されない
+   ② ホーム画面に追加したアプリとして起動 → 音声認識が動かない          */
+const IOS_OTHER_BROWSER = IS_IOS && /CriOS|FxiOS|EdgiOS|OPiOS/.test(UA);
+const IOS_BROWSER_NAME = /CriOS/.test(UA)?'Chrome':/FxiOS/.test(UA)?'Firefox':/EdgiOS/.test(UA)?'Edge':/OPiOS/.test(UA)?'Opera':'Safari';
+const STANDALONE = window.navigator.standalone===true || window.matchMedia('(display-mode: standalone)').matches;
+const IOS_BLOCKED = IS_IOS && (IOS_OTHER_BROWSER || STANDALONE);
+function iosBlockedReason(){
+  if(IOS_OTHER_BROWSER) return `iPhoneの${IOS_BROWSER_NAME}では音声入力が使えません（Safariで開くと使えます）。`;
+  if(STANDALONE) return 'ホーム画面のアイコンから開くと音声入力が使えません（Safariで開くと使えます）。';
+  return '';
+}
+
 const VOICE = IS_IOS ? {
     label:'🍎 Apple音声認識（Siriと同じエンジン）',
     interim:false,  // iOSは途中経過が不安定なので切る
@@ -511,8 +524,9 @@ let rec=null, listening=false, guardT=null, finalTxt='';
 let gotResult=false, gotAudio=false, lastErr='';
 
 function showEngine(){
-  document.getElementById('engineTag').textContent =
-    SR ? `使用中：${VOICE.label}` : '⌨️ この端末はキーボードの🎤で入力します';
+  const el=document.getElementById('engineTag');
+  if(IOS_BLOCKED || !SR){ el.textContent='⌨️ この開き方では、キーボードの🎤で入力します'; }
+  else el.textContent=`使用中：${VOICE.label}`;
 }
 function setHeard(t){ document.getElementById('heard').textContent=t; }
 function toggleMic(){ listening ? stopMic() : startMic(); }
@@ -521,6 +535,8 @@ function toggleMic(){ listening ? stopMic() : startMic(); }
    iOS Safari は「タップした流れが途切れずに」start() が呼ばれた時だけ音声を許可する。
    await を挟むとユーザー操作の文脈が切れ、無反応のまま終わる（実機で発生した不具合）。 */
 function startMic(){
+  // 起動しても必ず失敗する条件なら、待たせずに理由を出して代替手段へ
+  if(IOS_BLOCKED){ dictMode(iosBlockedReason()); return; }
   if(!SR){ dictMode('この端末はアプリからの音声起動に対応していません。'); return; }
   finalTxt=''; gotResult=false;
   document.getElementById('voiceParsed').innerHTML='';
