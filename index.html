@@ -97,9 +97,18 @@
   .catpick button.on{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
   .btn{width:100%;border:0;background:linear-gradient(135deg,var(--accent),#ff7a63);color:#fff;border-radius:16px;padding:16px;font-size:16px;font-weight:800;margin-top:20px;box-shadow:0 8px 18px rgba(255,120,90,.35)}
   .btn.ghost{background:#fff;color:var(--accent);border:1.5px solid var(--accent);box-shadow:none}
-  .mic{width:110px;height:110px;border-radius:50%;background:var(--accent-soft);color:var(--accent);border:0;font-size:44px;margin:10px auto;display:block}
+  .micwrap{position:relative;width:120px;height:120px;margin:12px auto 0}
+  .mic{position:absolute;inset:5px;width:110px;height:110px;border-radius:50%;background:var(--accent-soft);color:var(--accent);border:0;font-size:44px;padding:0}
   .mic.live{animation:pulse 1s infinite;background:var(--accent);color:#fff}
   @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(255,143,122,.5)}70%{box-shadow:0 0 0 22px rgba(255,143,122,0)}100%{box-shadow:0 0 0 0 rgba(255,143,122,0)}}
+  /* 残り時間のリング：聞いている間だけ減っていく */
+  .ring{position:absolute;inset:0;width:120px;height:120px;transform:rotate(-90deg);opacity:0;transition:opacity .2s}
+  .ring.on{opacity:1}
+  .ring-bg{fill:none;stroke:var(--line);stroke-width:5}
+  .ring-fg{fill:none;stroke:var(--accent);stroke-width:5;stroke-linecap:round;
+           stroke-dasharray:339.3;stroke-dashoffset:0}
+  .micstate{text-align:center;font-size:13px;font-weight:700;color:var(--sub);margin:12px 0 2px;min-height:20px}
+  .micstate.live{color:var(--accent)}
   .heard{text-align:center;font-size:18px;font-weight:700;min-height:26px;margin:6px 0}
   .engine{text-align:center;font-size:11px;color:var(--sub);margin-bottom:4px}
   .linkbtn{border:0;background:0;color:var(--sub);font-size:12px;font-weight:700;text-decoration:underline;padding:6px;font-family:inherit}
@@ -172,8 +181,13 @@
 
   <!-- 音声 -->
   <div id="paneVoice">
-    <p class="muted" style="text-align:center">マイクを押して「消しゴム 100円」のように話す</p>
-    <button class="mic" id="micBtn" onclick="toggleMic()">🎤</button>
+    <p class="muted" style="text-align:center">「消しゴム 100円」のように話してください</p>
+    <div class="micwrap">
+      <svg class="ring" viewBox="0 0 120 120"><circle class="ring-bg" cx="60" cy="60" r="54"/>
+        <circle class="ring-fg" id="ringFg" cx="60" cy="60" r="54"/></svg>
+      <button class="mic" id="micBtn" onclick="toggleMic()">🎤</button>
+    </div>
+    <div class="micstate" id="micState">タップして話しはじめる</div>
     <div class="heard" id="heard"></div>
     <div class="engine" id="engineTag"></div>
     <div style="text-align:center"><button class="linkbtn" onclick="dictMode('')">うまく反応しないときはこちら ⌨️</button></div>
@@ -455,7 +469,8 @@ function inTab(t){
   document.getElementById('paneReceipt').style.display=t==='receipt'?'':'none';
   document.getElementById('paneManual').style.display=t==='manual'?'':'none';
   if(t==='manual') buildCatPick();
-  if(t==='voice'){ setHeard(''); document.getElementById('voiceParsed').innerHTML='';
+  if(t==='voice'){ setHeard(''); setState('タップして話しはじめる'); stopRing();
+    document.getElementById('voiceParsed').innerHTML='';
     document.getElementById('dictWrap').style.display='none'; showEngine(); }
   if(t==='receipt'){ document.getElementById('recParsed').innerHTML=''; }
 }
@@ -529,7 +544,14 @@ function showEngine(){
   else el.textContent=`使用中：${VOICE.label}`;
 }
 function setHeard(t){ document.getElementById('heard').textContent=t; }
-function toggleMic(){ listening ? stopMic() : startMic(); }
+function setState(t,live){
+  const el=document.getElementById('micState');
+  el.textContent=t; el.classList.toggle('live',!!live);
+}
+/* マイクを押したときの動き
+   ・止まっている → 聞き取り開始
+   ・聞いている   → そこで確定（聞き取れていれば内容を採用する。捨てない） */
+function toggleMic(){ listening ? finishMic(true) : startMic(); }
 
 /* ★重要★ この関数は async にしないこと。
    iOS Safari は「タップした流れが途切れずに」start() が呼ばれた時だけ音声を許可する。
@@ -538,15 +560,17 @@ function startMic(){
   // 起動しても必ず失敗する条件なら、待たせずに理由を出して代替手段へ
   if(IOS_BLOCKED){ dictMode(iosBlockedReason()); return; }
   if(!SR){ dictMode('この端末はアプリからの音声起動に対応していません。'); return; }
-  finalTxt=''; gotResult=false;
+  finalTxt=''; gotResult=false; gotAudio=false;
   document.getElementById('voiceParsed').innerHTML='';
   document.getElementById('dictWrap').style.display='none';
+  setHeard('');
 
   try{ rec=new SR(); }catch(e){ dictMode('音声エンジンを起動できませんでした。'); return; }
   rec.lang='ja-JP'; rec.interimResults=VOICE.interim; rec.continuous=false; rec.maxAlternatives=1;
 
-  rec.onstart=()=>{ setHeard('聞いています…'); };
+  rec.onstart=()=>{ setState('聞いています…　タップで確定',true); };
   rec.onaudiostart=()=>{ gotAudio=true; };
+  rec.onspeechstart=()=>{ setState('聞き取っています…　タップで確定',true); };
   rec.onresult=e=>{
     gotResult=true;
     let interim='';
@@ -582,26 +606,48 @@ function startMic(){
 
   listening=true;
   document.getElementById('micBtn').classList.add('live');
-  setHeard('聞いています…');
+  setState('聞いています…　タップで確定',true);
   resetGuard();
 }
+/* 無音が続いたら自動で確定するまでの残り時間。声を検知するたびに満タンに戻す */
 function resetGuard(){
   clearTimeout(guardT);
   guardT=setTimeout(()=>{ if(listening) finishMic(); }, VOICE.guardMs);
+  startRing();
 }
-function finishMic(){
+function startRing(){
+  const ring=document.getElementById('ringFg');
+  const wrap=document.querySelector('.ring');
+  if(!ring||!wrap) return;
+  wrap.classList.add('on');
+  ring.style.transition='none'; ring.style.strokeDashoffset='0';
+  void ring.getBoundingClientRect();  // 変更を確定させてからアニメを始める
+  ring.style.transition=`stroke-dashoffset ${VOICE.guardMs}ms linear`;
+  ring.style.strokeDashoffset='339.3';
+}
+function stopRing(){
+  const ring=document.getElementById('ringFg');
+  const wrap=document.querySelector('.ring');
+  if(!ring||!wrap) return;
+  wrap.classList.remove('on');
+  ring.style.transition='none'; ring.style.strokeDashoffset='0';
+}
+/* byUser=true … 利用者が自分でマイクを押して止めた場合 */
+function finishMic(byUser){
   const t=finalTxt.trim();
   stopMic();
-  if(t){ parseVoice(t); return; }
+  if(t){ parseVoice(t); return; }              // 聞き取れていれば採用
+  if(byUser && !gotAudio){ setHeard(''); return; }  // 話す前に止めた＝ただの取り消し
   setHeard('聞き取れませんでした');
   // なぜ拾えなかったかで案内を変える
   if(!gotAudio && !gotResult) dictMode('マイクが反応しませんでした。');
   else dictMode('うまく聞き取れませんでした。');
 }
 function stopMic(){
-  listening=false; clearTimeout(guardT);
+  listening=false; clearTimeout(guardT); stopRing();
   try{ rec && rec.stop(); }catch(e){}
   const b=document.getElementById('micBtn'); if(b) b.classList.remove('live');
+  setState('タップして話しはじめる');
 }
 
 /* 3段目：OS標準キーボードの🎤に誘導（iPhoneならSiri式ディクテーションがここで使える） */
