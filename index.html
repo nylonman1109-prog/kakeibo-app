@@ -113,6 +113,13 @@
   .engine{text-align:center;font-size:11px;color:var(--sub);margin-bottom:4px}
   .linkbtn{border:0;background:0;color:var(--sub);font-size:12px;font-weight:700;text-decoration:underline;padding:6px;font-family:inherit}
   .note{background:var(--accent-soft);color:#a1533f;border-radius:14px;padding:12px 14px;font-size:13px;font-weight:600;line-height:1.7;margin:14px 0 10px}
+  /* キーボードモード：入力欄を主役に大きく見せる */
+  .dictbox{background:#fff;border:2px solid var(--accent);border-radius:18px;padding:16px 14px 12px;margin:12px 0 4px;
+           box-shadow:0 6px 18px rgba(255,143,122,.18)}
+  .dictbox input{border:0;padding:6px 2px;font-size:20px;font-weight:700;text-align:center}
+  .dictbox input:focus{outline:0}
+  .dicthint{text-align:center;font-size:12px;color:var(--sub);font-weight:600;margin-top:8px;
+            border-top:1px dashed var(--line);padding-top:9px}
   .scan{background:#fff;border:2px dashed var(--line);border-radius:18px;padding:28px 16px;text-align:center;color:var(--sub)}
   .scan .big{font-size:40px}
   .parsed{background:#fff;border-radius:16px;padding:14px;margin-top:14px;border:1px solid var(--line)}
@@ -181,23 +188,33 @@
 
   <!-- 音声 -->
   <div id="paneVoice">
-    <p class="muted" style="text-align:center">「消しゴム 100円」のように話してください</p>
-    <div class="micwrap">
-      <svg class="ring" viewBox="0 0 120 120"><circle class="ring-bg" cx="60" cy="60" r="54"/>
-        <circle class="ring-fg" id="ringFg" cx="60" cy="60" r="54"/></svg>
-      <button class="mic" id="micBtn" onclick="toggleMic()">🎤</button>
+    <!-- ▼ 直接モード：アプリのマイクで直接聞き取る（使える端末のみ） -->
+    <div id="modeDirect">
+      <p class="muted" style="text-align:center">「消しゴム 100円」のように話してください</p>
+      <div class="micwrap">
+        <svg class="ring" viewBox="0 0 120 120"><circle class="ring-bg" cx="60" cy="60" r="54"/>
+          <circle class="ring-fg" id="ringFg" cx="60" cy="60" r="54"/></svg>
+        <button class="mic" id="micBtn" onclick="toggleMic()">🎤</button>
+      </div>
+      <div class="micstate" id="micState">タップして話しはじめる</div>
+      <div class="heard" id="heard"></div>
+      <div class="engine" id="engineTag"></div>
+      <div style="text-align:center"><button class="linkbtn" onclick="switchToDict(true)">うまく動かないときはこちら ⌨️</button></div>
     </div>
-    <div class="micstate" id="micState">タップして話しはじめる</div>
-    <div class="heard" id="heard"></div>
-    <div class="engine" id="engineTag"></div>
-    <div style="text-align:center"><button class="linkbtn" onclick="dictMode('')">うまく反応しないときはこちら ⌨️</button></div>
+
+    <!-- ▼ キーボードモード：OS標準の音声入力を使う。どの端末でも確実に動く -->
+    <div id="modeDict" style="display:none">
+      <p class="muted" style="text-align:center">キーボードの 🎤 を押して話してください</p>
+      <div class="dictbox">
+        <input id="dictInput" placeholder="例）消しゴム 100円" enterkeyhint="done"
+               onkeydown="if(event.key==='Enter')useDict()">
+        <div class="dicthint" id="dictHint">枠をタップ →&nbsp; キーボードの 🎤 を押して話す</div>
+      </div>
+      <button class="btn" onclick="useDict()">この内容で追加する</button>
+      <div style="text-align:center"><button class="linkbtn" id="backToMic" onclick="switchToDirect()">アプリのマイクを試す 🎤</button></div>
+    </div>
+
     <div id="voiceParsed"></div>
-    <!-- 最終フォールバック：OS標準のキーボード音声入力（iPhoneのSiri式ディクテーション）に誘導 -->
-    <div id="dictWrap" style="display:none">
-      <div class="note" id="dictMsg"></div>
-      <input id="dictInput" placeholder="例）消しゴム 100円">
-      <button class="btn" onclick="useDict()">この内容で読み取る</button>
-    </div>
   </div>
 
   <!-- レシート -->
@@ -469,9 +486,17 @@ function inTab(t){
   document.getElementById('paneReceipt').style.display=t==='receipt'?'':'none';
   document.getElementById('paneManual').style.display=t==='manual'?'':'none';
   if(t==='manual') buildCatPick();
-  if(t==='voice'){ setHeard(''); setState('タップして話しはじめる'); stopRing();
+  if(t==='voice'){
+    setHeard(''); setState('タップして話しはじめる'); stopRing();
     document.getElementById('voiceParsed').innerHTML='';
-    document.getElementById('dictWrap').style.display='none'; showEngine(); }
+    document.getElementById('dictInput').value='';
+    // この端末で確実に動く方を出す（過去に失敗していればキーボード方式）
+    if(initialMode()==='dict') switchToDict(false, canDirect()
+        ? '前回うまく動かなかったため、確実な方法にしています。'
+        : '枠をタップ →  キーボードの 🎤 を押して話す');
+    else switchToDirect0();
+    showEngine();
+  }
   if(t==='receipt'){ document.getElementById('recParsed').innerHTML=''; }
 }
 
@@ -538,6 +563,49 @@ const VOICE = IS_IOS ? {
 let rec=null, listening=false, guardT=null, finalTxt='';
 let gotResult=false, gotAudio=false, lastErr='';
 
+/* ===== 入力方式の切り替え =====
+   direct … アプリのマイクで直接聞き取る（速いが端末の制限を受ける）
+   dict   … OS標準キーボードの🎤で入力（iPhoneのSiri式。どの端末でも確実に動く）
+   一度でも direct が失敗した端末は dict を記憶し、次回から最初から確実な方を出す。 */
+const MODE_KEY='yasashi_voice_mode';
+function savedMode(){ try{ return localStorage.getItem(MODE_KEY); }catch(e){ return null; } }
+function rememberMode(m){ try{ localStorage.setItem(MODE_KEY,m); }catch(e){} }
+function canDirect(){ return !!SR && !IOS_BLOCKED; }
+/* 最初にどちらを出すかの判定 */
+function initialMode(){
+  if(!canDirect()) return 'dict';
+  if(savedMode()==='dict') return 'dict';
+  return 'direct';
+}
+/* キーボードモードへ。byUser=true（タップ由来）ならその場でキーボードを開く */
+function switchToDict(byUser,msg){
+  stopMic();
+  document.getElementById('modeDirect').style.display='none';
+  document.getElementById('modeDict').style.display='';
+  document.getElementById('backToMic').style.display = canDirect()?'':'none';
+  document.getElementById('dictHint').textContent =
+    msg || '枠をタップ →  キーボードの 🎤 を押して話す';
+  // iOSはタップの流れの中で focus した時だけキーボードが開く
+  if(byUser){ const el=document.getElementById('dictInput'); el.focus(); el.click&&el.click(); }
+}
+/* 表示を直接モードに戻すだけ（記憶は変えない） */
+function switchToDirect0(){
+  document.getElementById('modeDict').style.display='none';
+  document.getElementById('modeDirect').style.display='';
+  setState('タップして話しはじめる'); setHeard(''); stopRing();
+}
+/* 利用者が自分で「アプリのマイクを試す」を押したとき＝もう一度だけ直接モードを試す */
+function switchToDirect(){
+  rememberMode('direct');
+  switchToDirect0();
+  showEngine();
+}
+/* 直接モードが使えないと分かった時：記憶して、理由を添えてキーボードモードへ */
+function fallbackToDict(reason){
+  rememberMode('dict');
+  switchToDict(false, reason);
+}
+
 function showEngine(){
   const el=document.getElementById('engineTag');
   if(IOS_BLOCKED || !SR){ el.textContent='⌨️ この開き方では、キーボードの🎤で入力します'; }
@@ -556,16 +624,16 @@ function toggleMic(){ listening ? finishMic(true) : startMic(); }
 /* ★重要★ この関数は async にしないこと。
    iOS Safari は「タップした流れが途切れずに」start() が呼ばれた時だけ音声を許可する。
    await を挟むとユーザー操作の文脈が切れ、無反応のまま終わる（実機で発生した不具合）。 */
+let micStartAt=0;
 function startMic(){
-  // 起動しても必ず失敗する条件なら、待たせずに理由を出して代替手段へ
-  if(IOS_BLOCKED){ dictMode(iosBlockedReason()); return; }
-  if(!SR){ dictMode('この端末はアプリからの音声起動に対応していません。'); return; }
-  finalTxt=''; gotResult=false; gotAudio=false;
+  // 起動しても必ず失敗する条件なら、待たせずに確実な方式へ
+  if(IOS_BLOCKED){ fallbackToDict(iosBlockedReason()); return; }
+  if(!SR){ fallbackToDict('この端末はアプリからのマイク起動に対応していません。'); return; }
+  finalTxt=''; gotResult=false; gotAudio=false; micStartAt=Date.now();
   document.getElementById('voiceParsed').innerHTML='';
-  document.getElementById('dictWrap').style.display='none';
   setHeard('');
 
-  try{ rec=new SR(); }catch(e){ dictMode('音声エンジンを起動できませんでした。'); return; }
+  try{ rec=new SR(); }catch(e){ fallbackToDict('マイクを起動できませんでした。'); return; }
   rec.lang='ja-JP'; rec.interimResults=VOICE.interim; rec.continuous=false; rec.maxAlternatives=1;
 
   rec.onstart=()=>{ setState('聞いています…　タップで確定',true); };
@@ -587,22 +655,34 @@ function startMic(){
     const err=(e&&e.error)||'unknown';
     lastErr=err;
     if(err==='not-allowed'||err==='service-not-allowed'){
-      dictMode('マイクが許可されていません。端末の設定でこのサイトのマイクを許可してください。');
+      fallbackToDict('マイクの使用が許可されていません。');
     }else if(err==='no-speech'){
-      stopMic(); setHeard('聞き取れませんでした。もう一度どうぞ');
+      stopMic(); setState('聞き取れませんでした。もう一度どうぞ');
     }else if(err==='network'){
-      dictMode('音声認識サーバーに接続できませんでした（通信環境をご確認ください）。');
+      fallbackToDict('音声認識サーバーに接続できませんでした。');
     }else if(err==='aborted'){
       stopMic();
     }else{
-      dictMode('音声認識を利用できませんでした（'+err+'）。');
+      fallbackToDict('この端末では音声認識を利用できませんでした（'+err+'）。');
     }
   };
-  rec.onend=()=>{ if(listening) finishMic(); };
+  /* 起動した直後に終わってしまう端末（iOSに多い）を検知する。
+     マイクが一度も開かないまま2秒未満で終了＝この端末では使えないと判断し、
+     以後は確実に動くキーボード方式で開くよう記憶する。 */
+  rec.onend=()=>{
+    if(!listening) return;
+    const tooFast = (Date.now()-micStartAt) < 2000;
+    if(tooFast && !gotAudio && !finalTxt){
+      stopMic();
+      fallbackToDict('この端末ではアプリのマイクがすぐ止まってしまうため、確実な方法に切り替えました。');
+      return;
+    }
+    finishMic();
+  };
 
   // start() は同期的に。ここで例外＝この端末では起動不可
   try{ rec.start(); }
-  catch(e){ dictMode('音声エンジンを起動できませんでした。'); return; }
+  catch(e){ fallbackToDict('マイクを起動できませんでした。'); return; }
 
   listening=true;
   document.getElementById('micBtn').classList.add('live');
@@ -638,10 +718,10 @@ function finishMic(byUser){
   stopMic();
   if(t){ parseVoice(t); return; }              // 聞き取れていれば採用
   if(byUser && !gotAudio){ setHeard(''); return; }  // 話す前に止めた＝ただの取り消し
-  setHeard('聞き取れませんでした');
+  setHeard('');
   // なぜ拾えなかったかで案内を変える
-  if(!gotAudio && !gotResult) dictMode('マイクが反応しませんでした。');
-  else dictMode('うまく聞き取れませんでした。');
+  if(!gotAudio && !gotResult) fallbackToDict('マイクが反応しませんでした。');
+  else setState('聞き取れませんでした。もう一度どうぞ');
 }
 function stopMic(){
   listening=false; clearTimeout(guardT); stopRing();
@@ -650,19 +730,12 @@ function stopMic(){
   setState('タップして話しはじめる');
 }
 
-/* 3段目：OS標準キーボードの🎤に誘導（iPhoneならSiri式ディクテーションがここで使える） */
-function dictMode(msg){
-  stopMic();
-  document.getElementById('dictMsg').textContent = (msg||'')+'下の枠をタップして、キーボードの 🎤 で話してください。';
-  document.getElementById('dictWrap').style.display='';
-  document.getElementById('dictInput').focus();
-}
+/* キーボードモードで入力された文を採用する */
 function useDict(){
-  const t=document.getElementById('dictInput').value.trim();
+  const el=document.getElementById('dictInput');
+  const t=el.value.trim();
   if(!t){ toast('内容を入れてね'); return; }
-  setHeard(t);
-  document.getElementById('dictInput').value='';
-  document.getElementById('dictWrap').style.display='none';
+  el.value=''; el.blur();
   parseVoice(t);
 }
 
