@@ -40,6 +40,10 @@
   th{color:var(--sub);font-size:11px}
   .phrase{background:#fff;border-radius:12px;padding:10px 12px;font-size:15px;font-weight:800;text-align:center;
           border:2px dashed var(--accent);color:var(--accent);margin-bottom:10px}
+  /* 録音中の音量メーター：声が入っているか目で分かるように */
+  .level{height:8px;background:var(--line);border-radius:99px;overflow:hidden;margin:8px 0 4px}
+  .level span{display:block;height:100%;width:0;border-radius:99px;
+              background:linear-gradient(90deg,var(--ok),var(--warn),var(--ng));transition:width .08s}
 </style>
 </head>
 <body>
@@ -57,7 +61,12 @@
   <p class="desc">押して読み上げ、もう一度押して終了。1回の録音を全エンジンで共有します。</p>
   <button class="recbtn" id="recBtn" onclick="toggleRec()">🎤</button>
   <div class="state" id="recState">タップして録音</div>
+  <div class="level"><span id="levelBar"></span></div>
   <div class="meta" id="recMeta"></div>
+  <div id="playWrap" style="display:none">
+    <audio id="player" controls style="width:100%;margin-top:10px"></audio>
+    <div class="meta" id="qualityMsg"></div>
+  </div>
 </div>
 
 <div class="card" id="cardA">
@@ -107,7 +116,7 @@ window.nextPhrase=()=>{ pi=(pi+1)%PHRASES.length; $('phrase').textContent=PHRASE
 const target=()=>PHRASES[pi];
 
 /* ===== 録音（MediaRecorder：iPhoneのChromeやホーム画面アプリでも動く） ===== */
-let mr=null, chunks=[], recording=false, audioBlob=null, recStart=0;
+let mr=null, chunks=[], recording=false, audioBlob=null, recStart=0, wavBlob=null, RECQ=null;
 window.toggleRec=async()=>{
   if(recording){ mr.stop(); return; }
   try{
@@ -117,16 +126,35 @@ window.toggleRec=async()=>{
       .find(m=>window.MediaRecorder&&MediaRecorder.isTypeSupported(m))||'';
     mr=new MediaRecorder(stream, mime?{mimeType:mime}:undefined);
     mr.ondataavailable=e=>{ if(e.data.size) chunks.push(e.data); };
-    mr.onstop=()=>{
+    mr.onstop=async()=>{
       stream.getTracks().forEach(t=>t.stop());
       audioBlob=new Blob(chunks,{type:mr.mimeType||'audio/webm'});
+      pcmCache=null; wavBlob=null;
       recording=false;
       $('recBtn').classList.remove('live');
-      $('recState').textContent='録音できました。各エンジンを試してください';
+      $('recState').textContent='録音できました。まず聞き返してください';
       const sec=((Date.now()-recStart)/1000).toFixed(1);
       $('recMeta').textContent=`長さ ${sec}秒 ／ 形式 ${mr.mimeType||'不明'} ／ ${(audioBlob.size/1024).toFixed(0)}KB`;
+      // 聞き返せるようにする（音が悪いのか処理が悪いのかを切り分けるため）
+      $('player').src=URL.createObjectURL(audioBlob);
+      $('playWrap').style.display='';
+      // 声が入っているかを数値で判定
+      try{
+        const pcm=await toPCM16k(audioBlob);
+        const st=audioStats(pcm);
+        wavBlob=pcmToWav(pcm);
+        let msg, ok=true;
+        if(st.peak<0.02){ msg='⚠ ほぼ無音です。マイクが拾えていません'; ok=false; }
+        else if(st.rms<0.01){ msg='⚠ 音が小さすぎます。近づいて大きめに話してください'; ok=false; }
+        else if(st.peak>0.99){ msg='⚠ 音が大きすぎて割れています。少し離してください'; ok=false; }
+        else msg='✓ 声はしっかり入っています';
+        $('qualityMsg').innerHTML=`<b style="color:${ok?'var(--ok)':'var(--ng)'}">${msg}</b>`+
+          ` ／ 音量 ${st.db}dB ／ 最大 ${(st.peak*100).toFixed(0)}% ／ 変換後 ${st.sec.toFixed(1)}秒 ／ WAV ${(wavBlob.size/1024).toFixed(0)}KB`;
+        RECQ={...st, ok};
+      }catch(e){ $('qualityMsg').textContent='音の解析に失敗: '+(e.message||e); }
       ['btnB','btnC'].forEach(b=>$(b).disabled=false);
     };
+    startMeter(stream);
     mr.start(); recording=true; recStart=Date.now();
     $('recBtn').classList.add('live');
     $('recState').textContent='● 録音中… もう一度タップで終了';
@@ -136,22 +164,75 @@ window.toggleRec=async()=>{
 };
 ['btnB','btnC'].forEach(b=>$(b).disabled=true);
 
-/* 録音を16kHzのモノラルに変換（Whisperが必要とする形） */
+/* 録音中に声が入っているかを、その場で棒グラフに出す */
+let meterCtx=null, meterRaf=null;
+function startMeter(stream){
+  try{
+    const AC=window.AudioContext||window.webkitAudioContext;
+    meterCtx=new AC();
+    const an=meterCtx.createAnalyser(); an.fftSize=512;
+    meterCtx.createMediaStreamSource(stream).connect(an);
+    const data=new Uint8Array(an.fftSize);
+    const tick=()=>{
+      if(!recording){ stopMeter(); return; }
+      an.getByteTimeDomainData(data);
+      let peak=0;
+      for(let i=0;i<data.length;i++){ const a=Math.abs(data[i]-128)/128; if(a>peak) peak=a; }
+      $('levelBar').style.width=Math.min(100,peak*160)+'%';
+      meterRaf=requestAnimationFrame(tick);
+    };
+    tick();
+  }catch(e){}
+}
+function stopMeter(){
+  cancelAnimationFrame(meterRaf);
+  $('levelBar').style.width='0%';
+  try{ meterCtx&&meterCtx.close(); }catch(e){}
+  meterCtx=null;
+}
+
+/* 録音を16kHzのモノラルに変換する。
+   単純な間引きだと高音が雑音として折り返り（エイリアシング）声が潰れるため、
+   ブラウザ内蔵の高品質リサンプラ(OfflineAudioContext)に任せる。 */
+let pcmCache=null;
 async function toPCM16k(blob){
+  if(pcmCache) return pcmCache;
   const ab=await blob.arrayBuffer();
   const AC=window.AudioContext||window.webkitAudioContext;
-  const ctx=new AC();
-  const buf=await ctx.decodeAudioData(ab);
-  const src=buf.getChannelData(0);
-  if(Math.abs(buf.sampleRate-16000)<1){ ctx.close(); return src; }
-  const ratio=buf.sampleRate/16000, len=Math.floor(src.length/ratio);
-  const out=new Float32Array(len);
-  for(let i=0;i<len;i++){                       // 線形補間で16kHzに落とす
-    const p=i*ratio, i0=Math.floor(p), i1=Math.min(i0+1,src.length-1);
-    out[i]=src[i0]+(src[i1]-src[i0])*(p-i0);
-  }
-  ctx.close();
-  return out;
+  const tmp=new AC();
+  const buf=await tmp.decodeAudioData(ab.slice(0));
+  tmp.close();
+  const frames=Math.ceil(buf.duration*16000);
+  const OAC=window.OfflineAudioContext||window.webkitOfflineAudioContext;
+  const off=new OAC(1, frames, 16000);
+  const src=off.createBufferSource(); src.buffer=buf;
+  src.connect(off.destination); src.start();
+  const rendered=await off.startRendering();
+  pcmCache=rendered.getChannelData(0);
+  return pcmCache;
+}
+
+/* 16kHzモノラルのPCMをWAVにする。
+   GeminiはwebmもOpusも受け取れないため、送る前に必ずWAVへ変換する。 */
+function pcmToWav(pcm){
+  const n=pcm.length, buf=new ArrayBuffer(44+n*2), v=new DataView(buf);
+  const s=(o,t)=>{ for(let i=0;i<t.length;i++) v.setUint8(o+i,t.charCodeAt(i)); };
+  s(0,'RIFF'); v.setUint32(4,36+n*2,true); s(8,'WAVE');
+  s(12,'fmt '); v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,1,true);
+  v.setUint32(24,16000,true); v.setUint32(28,32000,true); v.setUint16(32,2,true); v.setUint16(34,16,true);
+  s(36,'data'); v.setUint32(40,n*2,true);
+  for(let i=0;i<n;i++){ const x=Math.max(-1,Math.min(1,pcm[i]));
+    v.setInt16(44+i*2, x<0?x*0x8000:x*0x7FFF, true); }
+  return new Blob([buf],{type:'audio/wav'});
+}
+
+/* 録音がそもそも声を拾えているかを数値で確かめる */
+function audioStats(pcm){
+  let peak=0, sum=0;
+  for(let i=0;i<pcm.length;i++){ const a=Math.abs(pcm[i]); if(a>peak) peak=a; sum+=a*a; }
+  const rms=Math.sqrt(sum/pcm.length);
+  return { peak, rms, sec:pcm.length/16000,
+           db:(20*Math.log10(rms||1e-9)).toFixed(1) };
 }
 
 const RES={};
@@ -210,9 +291,13 @@ window.testWhisper=async()=>{
     const pcm=await toPCM16k(audioBlob);
     const out=await pipe(pcm,{language:'japanese',task:'transcribe'});
     const tRun=Date.now()-t1;
-    const text=(out.text||'').trim();
+    let text=(out.text||'').trim();
+    // Whisperは無音や雑音に対して決まり文句を作り出す。それを声と誤解しないよう弾く
+    const GHOST=/^[\s(（]*(音楽|拍手|BGM|ご視聴ありがとうございました|チャンネル登録|おわり|終わり|Thank you|Thanks for watching|音楽\)|\(音楽\))[\s)）。、]*$/i;
+    const ghost=GHOST.test(text);
+    if(ghost) text='';
     const s=score(text);
-    $('resB').textContent=text||'（聞き取れず）';
+    $('resB').textContent=text||(ghost?'（声を検出できず。無音に反応した決まり文句を除外）':'（聞き取れず）');
     $('metaB').textContent=`読込 ${(tLoad/1000).toFixed(1)}秒 ／ 変換 ${(tRun/1000).toFixed(1)}秒 ／ 数字 ${s.numOK?'一致':'不一致'}`;
     setTag('tagB', s.numOK?'成功':'誤認識', s.numOK?'ok':'warn');
     RES.B={ok:true,text,ms:tRun,load:tLoad,numOK:s.numOK,model:name}; render();
@@ -231,16 +316,23 @@ window.testGemini=async()=>{
   setTag('tagC','送信中','run'); $('resC').textContent='AIに送っています…';
   const t0=Date.now();
   try{
+    // GeminiはwebmやOpusを受け取れないため、必ずWAVにしてから送る
+    if(!wavBlob) wavBlob=pcmToWav(await toPCM16k(audioBlob));
     const b64=await new Promise(r=>{ const fr=new FileReader();
-      fr.onload=()=>r(fr.result.split(',')[1]); fr.readAsDataURL(audioBlob); });
-    const prompt=`この音声は家計簿の入力です。日本語で聞き取り、JSONのみ返してください。
+      fr.onload=()=>r(fr.result.split(',')[1]); fr.readAsDataURL(wavBlob); });
+    const prompt=`添付した音声を日本語で文字起こししてください。家計簿の入力です。
+必ず音声だけを根拠にしてください。聞き取れない部分は推測で補わず空にしてください。
+数字は特に正確に。次の形のJSONだけを返してください:
 {"text":"聞こえたまま","name":"品名や店名","amount":金額の数値,"category":"食費|外食|日用品|遊び|交通|その他"}`;
     const res=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${encodeURIComponent(key)}`,{
       method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({contents:[{parts:[
-        {text:prompt},
-        {inline_data:{mime_type:(audioBlob.type||'audio/webm').split(';')[0], data:b64}}
-      ]}]})
+      body:JSON.stringify({
+        contents:[{parts:[
+          {text:prompt},
+          {inline_data:{mime_type:'audio/wav', data:b64}}
+        ]}],
+        generationConfig:{ temperature:0, responseMimeType:'application/json' }
+      })
     });
     const ms=Date.now()-t0;
     if(!res.ok){ const err=await res.text();
@@ -284,7 +376,8 @@ function render(){
   ['A','B','C'].forEach(k=>$('card'+k).classList.toggle('win',k===best));
 }
 window.copySummary=()=>{
-  const t='【音声エンジン比較】読み上げ文: '+target()+'\n端末: '+navigator.userAgent+'\n\n'+
+  const t='【音声エンジン比較】読み上げ文: '+target()+'\n端末: '+navigator.userAgent+
+    '\n録音: '+(RECQ? `${RECQ.sec.toFixed(1)}秒 音量${RECQ.db}dB 最大${(RECQ.peak*100).toFixed(0)}% ${RECQ.ok?'✓声あり':'⚠問題あり'}` : '未録音')+'\n\n'+
     Object.keys(RES).map(k=>{ const r=RES[k];
       return `${NAMES[k]}: ${r.ok?`「${r.text}」 ${(r.ms/1000).toFixed(1)}秒 ${r.numOK?'◎正確':'△誤り'}`:'✗ '+(r.note||'失敗')}`;
     }).join('\n');
