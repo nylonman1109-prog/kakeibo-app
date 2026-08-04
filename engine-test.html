@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>音声エンジン比較テスト</title>
+<style>
+  :root{--bg:#fbf7f4;--card:#fff;--ink:#3a3330;--sub:#9a8f89;--line:#efe7e1;
+        --accent:#ff8f7a;--soft:#ffe6df;--ok:#3d9e75;--ng:#e0553c;--warn:#d59320}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic UI",sans-serif;
+       background:var(--bg);color:var(--ink);margin:0 auto;padding:16px;max-width:480px;line-height:1.6}
+  h1{font-size:19px;margin:4px 0 2px}
+  .lead{font-size:13px;color:var(--sub);margin:0 0 14px}
+  .card{background:var(--card);border-radius:16px;padding:14px 16px;margin-bottom:12px;
+        box-shadow:0 4px 14px rgba(180,150,140,.12)}
+  .card h2{font-size:15px;margin:0 0 4px;display:flex;align-items:center;gap:7px}
+  .tag{font-size:10px;font-weight:800;padding:2px 8px;border-radius:99px;background:var(--line);color:var(--sub)}
+  .tag.ok{background:#e5f5ee;color:var(--ok)} .tag.ng{background:#ffe6df;color:var(--ng)}
+  .tag.warn{background:#fdf3e0;color:var(--warn)} .tag.run{background:var(--soft);color:var(--accent)}
+  .desc{font-size:12px;color:var(--sub);margin:2px 0 10px}
+  .result{background:#faf7f5;border-radius:12px;padding:11px 12px;font-size:15px;font-weight:700;
+          min-height:44px;display:flex;align-items:center;word-break:break-all}
+  .meta{font-size:11px;color:var(--sub);margin-top:6px;display:flex;gap:12px;flex-wrap:wrap}
+  button{border:0;border-radius:14px;padding:14px;font-size:15px;font-weight:800;width:100%;
+         background:linear-gradient(135deg,var(--accent),#ff7a63);color:#fff;font-family:inherit}
+  button.sub{background:#fff;color:var(--accent);border:1.5px solid var(--accent)}
+  button.gray{background:#fff;color:var(--sub);border:1.5px solid var(--line)}
+  button:disabled{opacity:.45}
+  .recbtn{width:96px;height:96px;border-radius:50%;font-size:38px;margin:6px auto;display:block;padding:0}
+  .recbtn.live{animation:p 1s infinite}
+  @keyframes p{0%{box-shadow:0 0 0 0 rgba(255,143,122,.5)}70%{box-shadow:0 0 0 20px rgba(255,143,122,0)}}
+  .state{text-align:center;font-size:13px;font-weight:700;color:var(--accent);min-height:22px;margin-bottom:6px}
+  input{width:100%;border:1px solid var(--line);border-radius:12px;padding:12px;font-size:15px;font-family:inherit}
+  label{font-size:12px;font-weight:700;color:var(--sub);display:block;margin:10px 0 5px}
+  .note{background:var(--soft);color:#a1533f;border-radius:12px;padding:11px 13px;font-size:12px;font-weight:600;margin:10px 0}
+  .win{border:2px solid var(--ok)}
+  table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}
+  th,td{padding:7px 4px;border-bottom:1px solid var(--line);text-align:left}
+  th{color:var(--sub);font-size:11px}
+  .phrase{background:#fff;border-radius:12px;padding:10px 12px;font-size:15px;font-weight:800;text-align:center;
+          border:2px dashed var(--accent);color:var(--accent);margin-bottom:10px}
+</style>
+</head>
+<body>
+<h1>🔬 音声エンジン比較テスト</h1>
+<p class="lead">同じ声を各エンジンに通して、この端末で何が一番いいかを実測します。</p>
+
+<div class="card">
+  <h2>① 読み上げる文</h2>
+  <div class="phrase" id="phrase">スーパーで 4820円</div>
+  <button class="gray" onclick="nextPhrase()">別の文にする 🔄</button>
+</div>
+
+<div class="card">
+  <h2>② 録音する</h2>
+  <p class="desc">押して読み上げ、もう一度押して終了。1回の録音を全エンジンで共有します。</p>
+  <button class="recbtn" id="recBtn" onclick="toggleRec()">🎤</button>
+  <div class="state" id="recState">タップして録音</div>
+  <div class="meta" id="recMeta"></div>
+</div>
+
+<div class="card" id="cardA">
+  <h2>Ａ ブラウザ標準 <span class="tag" id="tagA">未実施</span></h2>
+  <p class="desc">今アプリで使っている方式。無料・即時。iPhoneで制限を受ける。</p>
+  <div class="result" id="resA">—</div>
+  <div class="meta" id="metaA"></div>
+  <button class="sub" id="btnA" onclick="testWebSpeech()" style="margin-top:10px">Ａを単体で試す（別途しゃべる）</button>
+</div>
+
+<div class="card" id="cardB">
+  <h2>Ｂ Whisper 内蔵 <span class="tag" id="tagB">未実施</span></h2>
+  <p class="desc">端末の中だけで変換。無料・音声が外に出ない。初回だけモデルを読み込む。</p>
+  <label>モデルの大きさ</label>
+  <select id="wsize" style="width:100%;border:1px solid var(--line);border-radius:12px;padding:11px;font-size:15px;font-family:inherit">
+    <option value="Xenova/whisper-tiny">tiny（約40MB・速いが精度は低め）</option>
+    <option value="Xenova/whisper-base" selected>base（約80MB・バランス型）</option>
+    <option value="Xenova/whisper-small">small（約250MB・日本語に強い）</option>
+  </select>
+  <div class="result" id="resB" style="margin-top:10px">—</div>
+  <div class="meta" id="metaB"></div>
+  <button class="sub" id="btnB" onclick="testWhisper()" style="margin-top:10px">Ｂで変換する</button>
+</div>
+
+<div class="card" id="cardC">
+  <h2>Ｃ Gemini（AI） <span class="tag" id="tagC">未実施</span></h2>
+  <p class="desc">録音をGoogleのAIに送る。分類まで一発で取れる。実質無料枠あり。</p>
+  <div class="note">テスト用にご自身のAPIキーを貼ってください。この端末の中だけに保存され、外部には送りません（Google以外）。本番はGAS側にキーを置くので客は入力不要です。</div>
+  <label>Gemini APIキー（テスト用）</label>
+  <input id="gkey" type="password" placeholder="AIza..." autocomplete="off">
+  <div class="result" id="resC" style="margin-top:10px">—</div>
+  <div class="meta" id="metaC"></div>
+  <button class="sub" id="btnC" onclick="testGemini()" style="margin-top:10px">Ｃで変換する</button>
+</div>
+
+<div class="card">
+  <h2>③ 結果まとめ</h2>
+  <div id="summary"><p class="desc">録音して各エンジンを試すと、ここに比較表が出ます。</p></div>
+  <button class="sub" onclick="copySummary()" style="margin-top:10px">📋 結果をコピーして送る</button>
+</div>
+
+<script type="module">
+const PHRASES=['スーパーで 4820円','消しゴム 100円','ラーメン 980円','昨日 ガソリン 4500円','コンビニで お茶 160円'];
+let pi=0;
+const $=id=>document.getElementById(id);
+window.nextPhrase=()=>{ pi=(pi+1)%PHRASES.length; $('phrase').textContent=PHRASES[pi]; };
+const target=()=>PHRASES[pi];
+
+/* ===== 録音（MediaRecorder：iPhoneのChromeやホーム画面アプリでも動く） ===== */
+let mr=null, chunks=[], recording=false, audioBlob=null, recStart=0;
+window.toggleRec=async()=>{
+  if(recording){ mr.stop(); return; }
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+    chunks=[];
+    const mime=['audio/webm;codecs=opus','audio/webm','audio/mp4','audio/aac']
+      .find(m=>window.MediaRecorder&&MediaRecorder.isTypeSupported(m))||'';
+    mr=new MediaRecorder(stream, mime?{mimeType:mime}:undefined);
+    mr.ondataavailable=e=>{ if(e.data.size) chunks.push(e.data); };
+    mr.onstop=()=>{
+      stream.getTracks().forEach(t=>t.stop());
+      audioBlob=new Blob(chunks,{type:mr.mimeType||'audio/webm'});
+      recording=false;
+      $('recBtn').classList.remove('live');
+      $('recState').textContent='録音できました。各エンジンを試してください';
+      const sec=((Date.now()-recStart)/1000).toFixed(1);
+      $('recMeta').textContent=`長さ ${sec}秒 ／ 形式 ${mr.mimeType||'不明'} ／ ${(audioBlob.size/1024).toFixed(0)}KB`;
+      ['btnB','btnC'].forEach(b=>$(b).disabled=false);
+    };
+    mr.start(); recording=true; recStart=Date.now();
+    $('recBtn').classList.add('live');
+    $('recState').textContent='● 録音中… もう一度タップで終了';
+  }catch(e){
+    $('recState').textContent='✗ マイクを使えません: '+e.name;
+  }
+};
+['btnB','btnC'].forEach(b=>$(b).disabled=true);
+
+/* 録音を16kHzのモノラルに変換（Whisperが必要とする形） */
+async function toPCM16k(blob){
+  const ab=await blob.arrayBuffer();
+  const AC=window.AudioContext||window.webkitAudioContext;
+  const ctx=new AC();
+  const buf=await ctx.decodeAudioData(ab);
+  const src=buf.getChannelData(0);
+  if(Math.abs(buf.sampleRate-16000)<1){ ctx.close(); return src; }
+  const ratio=buf.sampleRate/16000, len=Math.floor(src.length/ratio);
+  const out=new Float32Array(len);
+  for(let i=0;i<len;i++){                       // 線形補間で16kHzに落とす
+    const p=i*ratio, i0=Math.floor(p), i1=Math.min(i0+1,src.length-1);
+    out[i]=src[i0]+(src[i1]-src[i0])*(p-i0);
+  }
+  ctx.close();
+  return out;
+}
+
+const RES={};
+function setTag(id,text,cls){ const t=$(id); t.textContent=text; t.className='tag '+(cls||''); }
+function score(got){                            // 数字が合っているかを主な指標にする
+  const norm=s=>s.replace(/[０-９]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0)).replace(/[,\s、。]/g,'');
+  const num=s=>(norm(s).match(/\d+/g)||[]).join('');
+  return { numOK: num(got)===num(target()) && num(got)!=='' , got:got };
+}
+
+/* ===== Ａ ブラウザ標準 ===== */
+window.testWebSpeech=()=>{
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR){ $('resA').textContent='この端末では利用できません'; setTag('tagA','使用不可','ng');
+           RES.A={ok:false,note:'APIなし'}; render(); return; }
+  setTag('tagA','聞いています','run'); $('resA').textContent='しゃべってください…';
+  const t0=Date.now(); let out='';
+  const r=new SR(); r.lang='ja-JP'; r.interimResults=true; r.continuous=false;
+  r.onresult=e=>{ out=''; for(let i=0;i<e.results.length;i++) out+=e.results[i][0].transcript;
+                  $('resA').textContent=out; };
+  r.onerror=e=>{ $('resA').textContent='✗ エラー: '+e.error; setTag('tagA','失敗','ng');
+                 RES.A={ok:false,note:e.error}; render(); };
+  r.onend=()=>{
+    const ms=Date.now()-t0;
+    if(!out){ if(!RES.A){ setTag('tagA','聞き取れず','ng'); RES.A={ok:false,note:'無音/即終了'}; render(); } return; }
+    const s=score(out);
+    $('resA').textContent=out; $('metaA').textContent=`${(ms/1000).toFixed(1)}秒 ／ 数字 ${s.numOK?'一致':'不一致'}`;
+    setTag('tagA', s.numOK?'成功':'誤認識', s.numOK?'ok':'warn');
+    RES.A={ok:true,text:out,ms,numOK:s.numOK}; render();
+  };
+  try{ r.start(); }catch(e){ $('resA').textContent='✗ 起動不可'; setTag('tagA','起動不可','ng');
+                             RES.A={ok:false,note:'start失敗'}; render(); }
+};
+
+/* ===== Ｂ Whisper（端末内） ===== */
+let pipe=null, pipeName='';
+window.testWhisper=async()=>{
+  if(!audioBlob){ alert('先に録音してください'); return; }
+  const name=$('wsize').value;
+  setTag('tagB','準備中','run'); $('resB').textContent='モデルを読み込んでいます…';
+  const t0=Date.now();
+  try{
+    if(!pipe||pipeName!==name){
+      const {pipeline,env}=await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.1');
+      env.allowLocalModels=false;
+      pipe=await pipeline('automatic-speech-recognition',name,{
+        dtype:'q8',
+        progress_callback:p=>{ if(p.status==='progress'&&p.progress)
+          $('resB').textContent=`モデル読込 ${p.progress.toFixed(0)}%`; }
+      });
+      pipeName=name;
+    }
+    const tLoad=Date.now()-t0;
+    $('resB').textContent='変換しています…'; setTag('tagB','変換中','run');
+    const t1=Date.now();
+    const pcm=await toPCM16k(audioBlob);
+    const out=await pipe(pcm,{language:'japanese',task:'transcribe'});
+    const tRun=Date.now()-t1;
+    const text=(out.text||'').trim();
+    const s=score(text);
+    $('resB').textContent=text||'（聞き取れず）';
+    $('metaB').textContent=`読込 ${(tLoad/1000).toFixed(1)}秒 ／ 変換 ${(tRun/1000).toFixed(1)}秒 ／ 数字 ${s.numOK?'一致':'不一致'}`;
+    setTag('tagB', s.numOK?'成功':'誤認識', s.numOK?'ok':'warn');
+    RES.B={ok:true,text,ms:tRun,load:tLoad,numOK:s.numOK,model:name}; render();
+  }catch(e){
+    $('resB').textContent='✗ '+(e.message||e); setTag('tagB','失敗','ng');
+    RES.B={ok:false,note:String(e.message||e)}; render();
+  }
+};
+
+/* ===== Ｃ Gemini（AI） ===== */
+window.testGemini=async()=>{
+  if(!audioBlob){ alert('先に録音してください'); return; }
+  const key=$('gkey').value.trim();
+  if(!key){ alert('テスト用のAPIキーを入れてください'); return; }
+  try{ localStorage.setItem('gtest_key',key); }catch(e){}
+  setTag('tagC','送信中','run'); $('resC').textContent='AIに送っています…';
+  const t0=Date.now();
+  try{
+    const b64=await new Promise(r=>{ const fr=new FileReader();
+      fr.onload=()=>r(fr.result.split(',')[1]); fr.readAsDataURL(audioBlob); });
+    const prompt=`この音声は家計簿の入力です。日本語で聞き取り、JSONのみ返してください。
+{"text":"聞こえたまま","name":"品名や店名","amount":金額の数値,"category":"食費|外食|日用品|遊び|交通|その他"}`;
+    const res=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${encodeURIComponent(key)}`,{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({contents:[{parts:[
+        {text:prompt},
+        {inline_data:{mime_type:(audioBlob.type||'audio/webm').split(';')[0], data:b64}}
+      ]}]})
+    });
+    const ms=Date.now()-t0;
+    if(!res.ok){ const err=await res.text();
+      $('resC').textContent='✗ '+res.status+' '+err.slice(0,120); setTag('tagC','失敗','ng');
+      RES.C={ok:false,note:res.status+''}; render(); return; }
+    const j=await res.json();
+    const raw=j.candidates?.[0]?.content?.parts?.[0]?.text||'';
+    let o={}; try{ o=JSON.parse(raw.replace(/```json|```/g,'').trim()); }catch(e){ o={text:raw}; }
+    const text=o.text||raw;
+    const s=score(text);
+    $('resC').innerHTML=`${text}<br><span style="font-size:12px;color:#9a8f89;font-weight:600">
+      → ${o.name||'?'} / ¥${o.amount??'?'} / ${o.category||'?'}</span>`;
+    $('metaC').textContent=`${(ms/1000).toFixed(1)}秒 ／ 数字 ${s.numOK?'一致':'不一致'} ／ 分類まで取得`;
+    setTag('tagC', s.numOK?'成功':'誤認識', s.numOK?'ok':'warn');
+    RES.C={ok:true,text,ms,numOK:s.numOK,parsed:o}; render();
+  }catch(e){
+    $('resC').textContent='✗ '+(e.message||e); setTag('tagC','失敗','ng');
+    RES.C={ok:false,note:String(e.message||e)}; render();
+  }
+};
+try{ const k=localStorage.getItem('gtest_key'); if(k) $('gkey').value=k; }catch(e){}
+
+/* ===== まとめ ===== */
+const NAMES={A:'ブラウザ標準',B:'Whisper内蔵',C:'Gemini(AI)'};
+function render(){
+  const keys=Object.keys(RES);
+  if(!keys.length) return;
+  let best=null;
+  keys.forEach(k=>{ const r=RES[k]; if(!r.ok||!r.numOK) return;
+    if(!best||r.ms<RES[best].ms) best=k; });
+  $('summary').innerHTML=`<table><tr><th>エンジン</th><th>結果</th><th>速さ</th><th>判定</th></tr>`+
+    keys.map(k=>{ const r=RES[k];
+      return `<tr><td><b>${NAMES[k]}</b></td>
+        <td>${r.ok?(r.text||'').slice(0,14):'—'}</td>
+        <td>${r.ok?(r.ms/1000).toFixed(1)+'秒':'—'}</td>
+        <td>${!r.ok?'<span style="color:var(--ng)">✗ '+(r.note||'')+'</span>'
+             :r.numOK?'<span style="color:var(--ok)">◎ 正確</span>'
+             :'<span style="color:var(--warn)">△ 誤り</span>'}</td></tr>`;
+    }).join('')+`</table>`+
+    (best?`<div class="note" style="margin-top:10px">この端末での推奨： <b>${NAMES[best]}</b>（正確かつ最速）</div>`:'');
+  ['A','B','C'].forEach(k=>$('card'+k).classList.toggle('win',k===best));
+}
+window.copySummary=()=>{
+  const t='【音声エンジン比較】読み上げ文: '+target()+'\n端末: '+navigator.userAgent+'\n\n'+
+    Object.keys(RES).map(k=>{ const r=RES[k];
+      return `${NAMES[k]}: ${r.ok?`「${r.text}」 ${(r.ms/1000).toFixed(1)}秒 ${r.numOK?'◎正確':'△誤り'}`:'✗ '+(r.note||'失敗')}`;
+    }).join('\n');
+  navigator.clipboard?.writeText(t).then(()=>alert('コピーしました。貼って送ってください。'),()=>prompt('コピーして送ってください',t));
+};
+</script>
+</body>
+</html>
