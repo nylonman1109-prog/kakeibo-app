@@ -132,6 +132,25 @@
   .seg-small button{flex:1;border:1px solid var(--line);background:#fff;border-radius:11px;padding:9px;font-weight:700;font-size:13px;color:var(--sub)}
   .seg-small button.on{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
   .empty{text-align:center;color:var(--sub);padding:30px 10px;font-size:14px}
+  /* 予算のペース判定 */
+  .paceMsg{margin-top:10px;border-radius:12px;padding:9px 12px;font-size:12.5px;font-weight:700;text-align:center}
+  .paceMsg.good{background:#e5f5ee;color:#2f7d5c}
+  .paceMsg.warn{background:#fdf3e0;color:#a8741a}
+  .paceMsg.bad{background:var(--accent-soft);color:#b04a33}
+  /* シミュレーション */
+  .simrow{margin-bottom:16px}
+  .simhead{display:flex;justify-content:space-between;align-items:baseline;font-size:14px;margin-bottom:2px}
+  .simhead b{font-size:15px}
+  .simsub{font-size:11px;color:var(--sub);margin-bottom:7px}
+  input[type=range]{width:100%;accent-color:var(--accent);height:26px}
+  .simsave{background:linear-gradient(135deg,#fff6f2,#fff);border:2px solid var(--accent);border-radius:18px;
+           padding:16px;text-align:center;margin-top:6px}
+  .simsave .big{font-size:30px;font-weight:800;color:var(--accent);letter-spacing:-.02em}
+  .simsave .yr{font-size:13px;color:var(--sub);font-weight:700;margin-top:2px}
+  .canbuy{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:12px}
+  .canbuy span{background:#fff;border:1px solid var(--line);border-radius:99px;padding:6px 11px;font-size:12px;font-weight:700}
+  .badge{display:inline-block;background:var(--accent-soft);color:var(--accent);border-radius:99px;
+         padding:3px 10px;font-size:11px;font-weight:800;margin-left:6px}
 </style>
 </head>
 <body>
@@ -144,11 +163,35 @@
     <div class="total-amt"><span class="yen">¥</span><span id="homeTotal">0</span></div>
     <div id="homeVs" class="vs">先月比 —</div>
   </div>
+  <div id="budgetCard"></div>
   <div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
       <b style="font-size:15px">分類ごと</b><span class="muted" id="homeCount">0件</span>
     </div>
     <div id="homeCats"></div>
+  </div>
+</section>
+
+<!-- 設定 -->
+<section id="conf" class="screen">
+  <h1>設定</h1>
+  <div class="card">
+    <b style="font-size:15px">今月の予算</b>
+    <p class="muted" style="margin:4px 0 0;font-size:13px">使っていい上限を決めると、残りがひと目で分かります。</p>
+    <label>ひと月の予算（円）</label>
+    <input id="bTotal" type="number" inputmode="numeric" placeholder="例）80000">
+    <button class="btn" onclick="saveBudget()">保存する</button>
+  </div>
+  <div class="card">
+    <b style="font-size:15px">分類ごとの予算（任意）</b>
+    <p class="muted" style="margin:4px 0 10px;font-size:13px">決めた分類だけ、使いすぎを個別に知らせます。空欄なら管理しません。</p>
+    <div id="bCats"></div>
+    <button class="btn ghost" onclick="saveCatBudget()">分類ごとの予算を保存</button>
+  </div>
+  <div class="card">
+    <b style="font-size:15px">データ</b>
+    <p class="muted" style="margin:4px 0 10px;font-size:13px">記録はこの端末の中だけに保存されています。</p>
+    <button class="btn ghost" onclick="exportCSV()">📄 CSVで書き出す</button>
   </div>
 </section>
 
@@ -175,6 +218,7 @@
   <button class="on" data-nav="home" onclick="go('home')"><span class="ic">🏠</span>ホーム</button>
   <button data-nav="log" onclick="go('log')"><span class="ic">📋</span>履歴</button>
   <button data-nav="stat" onclick="go('stat')"><span class="ic">📊</span>分析</button>
+  <button data-nav="conf" onclick="go('conf')"><span class="ic">⚙️</span>設定</button>
 </nav>
 <button class="fab" onclick="openSheet()">＋</button>
 
@@ -280,8 +324,13 @@ function guessCat(text){
 const KEY='yasashi_kakeibo_v1';
 let DB = load();
 function load(){
-  try{const r=localStorage.getItem(KEY); if(r) return JSON.parse(r);}catch(e){}
-  return seed();
+  let d=null;
+  try{const r=localStorage.getItem(KEY); if(r) d=JSON.parse(r);}catch(e){}
+  if(!d) d=seed();
+  // 後から足した項目を補う（前の版で保存したデータもそのまま使えるように）
+  if(!d.budget) d.budget={total:0, cats:{}};
+  if(!d.budget.cats) d.budget.cats={};
+  return d;
 }
 function save(){ localStorage.setItem(KEY, JSON.stringify(DB)); }
 function seed(){
@@ -289,7 +338,10 @@ function seed(){
   const items=[];
   let id=1;
   function add(monthOffset,day,name,amount,cat,alone){
-    const d=new Date(now.getFullYear(), now.getMonth()-monthOffset, day);
+    // 今月ぶんは今日までに収める（未来の日付が混じるとペース判定が狂うため）
+    let dd=day;
+    if(monthOffset===0){ const t=now.getDate(); dd=t<=1?1:((day-1)%t)+1; }
+    const d=new Date(now.getFullYear(), now.getMonth()-monthOffset, dd);
     items.push({id:id++, date:dstr(d), name, amount, cat, alone: alone===undefined?null:alone});
   }
   // 先月
@@ -302,7 +354,7 @@ function seed(){
   add(0,6,'消しゴム・ノート',430,'daily'); add(0,9,'ガソリン',4500,'trans');
   add(0,11,'居酒屋 同僚と',3800,'eatout',false); add(0,14,'牛丼',560,'eatout',true);
   add(0,16,'スーパー',4120,'food'); add(0,19,'ゲーム課金',1500,'fun');
-  return {items};
+  return {items, budget:{total:80000, cats:{eatout:15000, food:30000}}};
 }
 
 /* ===== 日付ユーティリティ（すべてローカル時刻で統一：UTC変換で月がズレるのを防ぐ） ===== */
@@ -326,7 +378,86 @@ function go(id){
   if(id==='home') renderHome();
   if(id==='log') renderLog();
   if(id==='stat') renderStat();
+  if(id==='conf') renderConf();
   window.scrollTo(0,0);
+}
+
+/* ===== 月の進み具合（予算の日割り判定に使う） ===== */
+function monthProgress(){
+  const n=NOW();
+  const days=new Date(n.getFullYear(), n.getMonth()+1, 0).getDate();  // 今月の日数
+  const passed=n.getDate();
+  return { days, passed, left:days-passed, ratio:passed/days };
+}
+
+/* ===== 予算カード =====
+   「あといくら使えるか」を金額で出し、日割りのペースと着地見込みを添える */
+function renderBudget(spent, byCat){
+  const box=document.getElementById('budgetCard');
+  const b=DB.budget||{total:0,cats:{}};
+  if(!b.total){
+    box.innerHTML=`<div class="card" style="text-align:center">
+      <b style="font-size:15px">今月の予算を決めましょう</b>
+      <p class="muted" style="margin:6px 0 12px;font-size:13px">上限を決めると「あといくら使えるか」が出ます。</p>
+      <button class="btn ghost" onclick="go('conf')">予算を設定する</button></div>`;
+    return;
+  }
+  const left=b.total-spent;
+  const over=left<0;
+  const pct=Math.min(100, Math.round(spent/b.total*100));
+  const mp=monthProgress();
+  const perDay=mp.left>0 ? Math.floor(left/mp.left) : 0;     // 残り日数で割った1日あたり
+  const pace=mp.passed>0 ? spent/mp.passed*mp.days : 0;       // このペースでの着地見込み
+  const paceOver=pace-b.total;
+  // 使ったペースが日割りの目安を超えているか
+  const onTrack = spent <= b.total*mp.ratio;
+  const barColor = over?'var(--accent)' : onTrack?'var(--mint)' : 'var(--lemon)';
+
+  box.innerHTML=`<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:baseline">
+      <b style="font-size:15px">今月の残り</b>
+      <span class="muted" style="font-size:12px">予算 ¥${fmt(b.total)}</span>
+    </div>
+    <div style="text-align:center;margin:8px 0 4px">
+      <div style="font-size:34px;font-weight:800;letter-spacing:-.02em;color:${over?'var(--accent)':'var(--ink)'}">
+        ${over?'−':''}¥${fmt(Math.abs(left))}
+      </div>
+      <div class="muted" style="font-size:12px">${over?'予算を超えています':`${mp.left}日で使える金額`}</div>
+    </div>
+    <div class="bar" style="height:10px"><span style="width:${pct}%;background:${barColor}"></span></div>
+    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--sub);margin-top:5px">
+      <span>使った ¥${fmt(spent)}（${pct}%）</span><span>${mp.passed}/${mp.days}日</span>
+    </div>
+    ${!over&&mp.left>0?`<div style="text-align:center;margin-top:10px;font-size:13px;font-weight:700">
+        1日あたり <span style="color:var(--accent);font-size:17px">¥${fmt(perDay)}</span> まで</div>`:''}
+    <div class="paceMsg ${over?'bad':onTrack?'good':'warn'}">
+      ${over ? `⚠ 予算を ¥${fmt(-left)} 超えました`
+        : mp.passed<3 ? `月が始まったばかりです。数日たつとペースを判定できます`
+        : onTrack ? `✓ 順調です。この調子なら月末は ¥${fmt(Math.round(pace))} くらい`
+        : `⚠ 少し早いペース。このままだと月末に ¥${fmt(Math.round(paceOver))} オーバーします`}
+    </div>
+    ${catBudgetRows(byCat)}
+  </div>`;
+}
+/* 分類ごとに予算を決めている場合だけ、その進み具合を出す */
+function catBudgetRows(byCat){
+  const cats=DB.budget.cats||{};
+  const keys=Object.keys(cats).filter(k=>cats[k]>0&&CATS[k]);
+  if(!keys.length) return '';
+  return `<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:10px">
+    <div class="muted" style="font-size:12px;font-weight:700;margin-bottom:6px">分類ごとの残り</div>
+    ${keys.map(k=>{
+      const c=CATS[k], used=byCat[k]||0, lim=cats[k], rest=lim-used;
+      const p=Math.min(100,Math.round(used/lim*100));
+      const col=rest<0?'var(--accent)':used<=lim*monthProgress().ratio?'var(--mint)':'var(--lemon)';
+      return `<div style="margin-bottom:9px">
+        <div style="display:flex;justify-content:space-between;font-size:13px">
+          <span>${c.emoji} ${c.name}</span>
+          <b style="color:${rest<0?'var(--accent)':'var(--ink)'}">${rest<0?'−':'残り '}¥${fmt(Math.abs(rest))}</b>
+        </div>
+        <div class="bar" style="margin-top:4px"><span style="width:${p}%;background:${col}"></span></div>
+      </div>`;
+    }).join('')}</div>`;
 }
 
 /* ===== ホーム ===== */
@@ -349,6 +480,7 @@ function renderHome(){
   for(const k in CATS) by[k]=0;
   cur.forEach(i=>by[i.cat]+=i.amount);
   const max=Math.max(1,...Object.values(by));
+  renderBudget(tc, by);
   const box=document.getElementById('homeCats');
   const rows=Object.keys(CATS).filter(k=>by[k]>0).sort((a,b)=>by[b]-by[a]);
   if(rows.length===0){ box.innerHTML='<div class="empty">まだ記録がありません。＋から追加してね</div>'; return; }
@@ -361,6 +493,54 @@ function renderHome(){
         <div class="bar"><span style="width:${w}%;background:${c.color}"></span></div>
       </div></div>`;
   }).join('');
+}
+
+/* ===== 設定 ===== */
+function renderConf(){
+  document.getElementById('bTotal').value = DB.budget.total || '';
+  const cur=itemsOf(curYM());
+  const by={}; for(const k in CATS) by[k]=0;
+  cur.forEach(i=>by[i.cat]+=i.amount);
+  document.getElementById('bCats').innerHTML=Object.keys(CATS).map(k=>{
+    const c=CATS[k], v=DB.budget.cats[k]||'';
+    return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:9px">
+      <div class="cat-ic" style="background:${c.color}22">${c.emoji}</div>
+      <div style="flex:1">
+        <div style="font-size:13px;font-weight:700">${c.name}
+          <span class="muted" style="font-weight:600">（今月 ¥${fmt(by[k])}）</span></div>
+      </div>
+      <input type="number" inputmode="numeric" id="bc_${k}" value="${v}" placeholder="未設定"
+             style="width:110px;padding:9px;font-size:15px;text-align:right">
+    </div>`;
+  }).join('');
+}
+function saveBudget(){
+  const v=parseInt(document.getElementById('bTotal').value,10);
+  if(!v||v<=0){ toast('金額を入れてね'); return; }
+  DB.budget.total=v; save(); toast('予算を保存しました ✓'); go('home');
+}
+function saveCatBudget(){
+  const cats={};
+  Object.keys(CATS).forEach(k=>{
+    const v=parseInt(document.getElementById('bc_'+k).value,10);
+    if(v>0) cats[k]=v;
+  });
+  DB.budget.cats=cats; save(); toast('分類ごとの予算を保存しました ✓'); go('home');
+}
+/* 記録をCSVで書き出す（表計算ソフトで開ける形） */
+function exportCSV(){
+  const rows=[['日付','品名','金額','分類','だれと']]
+    .concat(DB.items.slice().sort((a,b)=>a.date.localeCompare(b.date))
+      .map(i=>[i.date, i.name, i.amount, CATS[i.cat].name,
+               i.alone===null?'':(i.alone?'一人':'複数')]));
+  const csv=rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\r\n');
+  const blob=new Blob([new Uint8Array([0xEF,0xBB,0xBF]), csv],{type:'text/csv'});  // Excelで文字化けしない
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=`家計簿_${dstr(NOW())}.csv`;
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),3000);
+  toast('CSVを書き出しました');
 }
 
 /* ===== 履歴 ===== */
@@ -399,7 +579,7 @@ function renderStat(){
   const body=document.getElementById('statBody');
   if(curStatTab==='cmp') body.innerHTML=viewCompare();
   else if(curStatTab==='year') body.innerHTML=viewYear();
-  else body.innerHTML=viewSim();
+  else { body.innerHTML=viewSim(); renderSimOut(); }
 }
 function viewCompare(){
   const cur=itemsOf(curYM()), prev=itemsOf(prevYM());
@@ -440,25 +620,108 @@ function viewYear(){
       <div><div class="muted">月平均</div><b style="font-size:20px">¥${fmt(avg)}</b></div>
     </div>`;
 }
+/* 減らせる対象を集める。回数と1回あたりの単価が出せる分類だけ扱う */
+function simTargets(){
+  const cur=itemsOf(curYM());
+  const defs=[
+    {key:'eatout', label:'外食', emoji:'🍜', note:'家で食べる日に替える'},
+    {key:'fun',    label:'遊び', emoji:'🎮', note:'回数を少し減らす'},
+    {key:'daily',  label:'日用品', emoji:'🧴', note:'まとめ買いにする'},
+  ];
+  return defs.map(d=>{
+    const arr=cur.filter(i=>i.cat===d.key);
+    const cnt=arr.length, sum=sumOf(arr);
+    return {...d, cnt, sum, avg: cnt?Math.round(sum/cnt):0};
+  }).filter(d=>d.cnt>0);
+}
+let simCut={};       // 分類ごとに「何回減らすか」
 function viewSim(){
   const cur=itemsOf(curYM());
+  const targets=simTargets();
+  if(!targets.length) return `<div class="card"><div class="empty">
+    まだ記録が少ないため試算できません。何件か登録すると使えます。</div></div>`;
   const out=cur.filter(i=>i.cat==='eatout');
-  const cnt=out.length, alone=out.filter(i=>i.alone===true).length, withppl=out.filter(i=>i.alone===false).length;
-  const spent=sumOf(out);
-  const avg = cnt? Math.round(spent/cnt):0;
-  const yearProj = spent*12;
-  return `<div class="sim">
-      <div class="muted">今月の外食レポート</div>
-      <div style="margin:10px 0;font-size:15px;line-height:1.9">
-        🍜 外食は <b>${cnt}回</b>（🙋一人 ${alone}回 / 👥複数 ${withppl}回）<br>
-        💰 使った額 <b>¥${fmt(spent)}</b> ・ 1回あたり <b>¥${fmt(avg)}</b>
+  const alone=out.filter(i=>i.alone===true).length, withppl=out.filter(i=>i.alone===false).length;
+
+  targets.forEach(t=>{ if(simCut[t.key]===undefined) simCut[t.key]=0;
+                       if(simCut[t.key]>t.cnt) simCut[t.key]=t.cnt; });
+
+  const rows=targets.map(t=>`
+    <div class="simrow">
+      <div class="simhead">
+        <span>${t.emoji} <b>${t.label}</b>を <b id="cut_${t.key}">${simCut[t.key]}</b> 回減らす</span>
+        <span class="muted">今月 ${t.cnt}回</span>
       </div>
-      <div class="muted" style="margin-top:6px">このペースが1年続くと…</div>
-      <div class="big">外食だけで 年 ¥${fmt(yearProj)}</div>
-      ${alone>0?`<div class="muted" style="margin-top:8px">一人外食を月${alone}回 → 家で食べると年 約¥${fmt(alone*avg*12)} の節約余地</div>`:''}
+      <div class="simsub">1回あたり約 ¥${fmt(t.avg)}　・　${t.note}</div>
+      <input type="range" min="0" max="${t.cnt}" value="${simCut[t.key]}"
+             oninput="setCut('${t.key}',this.value)">
+    </div>`).join('');
+
+  return `<div class="card">
+      <b style="font-size:15px">今月の内訳</b>
+      <div style="margin:8px 0 0;font-size:14px;line-height:1.9">
+        🍜 外食 <b>${out.length}回</b>${out.length?`（🙋一人 ${alone}回 / 👥複数 ${withppl}回）`:''}<br>
+        💰 外食で使った額 <b>¥${fmt(sumOf(out))}</b>
+      </div>
+    </div>
+    <div class="card">
+      <b style="font-size:15px">減らしてみる</b>
+      <p class="muted" style="margin:4px 0 14px;font-size:13px">つまみを動かすと、浮く金額がすぐ出ます。</p>
+      ${rows}
+      <div class="simsave" id="simOut"></div>
     </div>
     ${aiCard()}`;
 }
+/* つまみを動かしたとき。表示だけ差し替えるので画面は再描画しない */
+function setCut(key,val){
+  simCut[key]=parseInt(val,10)||0;
+  const el=document.getElementById('cut_'+key);
+  if(el) el.textContent=simCut[key];
+  renderSimOut();
+}
+function renderSimOut(){
+  const box=document.getElementById('simOut');
+  if(!box) return;
+  const targets=simTargets();
+  let saved=0;
+  const parts=[];
+  targets.forEach(t=>{
+    const n=simCut[t.key]||0;
+    if(n>0){ saved+=n*t.avg; parts.push(`${t.emoji}${t.label} ${n}回`); }
+  });
+  if(!saved){
+    box.innerHTML=`<div class="muted" style="font-size:13px">
+      つまみを動かすと、いくら浮くかが出ます</div>`;
+    return;
+  }
+  const spent=sumOf(itemsOf(curYM()));
+  const b=DB.budget||{total:0};
+  const budgetLine = b.total ? (()=>{
+      const leftNow=b.total-spent, leftAfter=leftNow+saved;
+      return leftNow<0 && leftAfter>=0
+        ? `<div class="paceMsg good" style="margin-top:12px">これで予算内に収まります（残り ¥${fmt(leftAfter)}）</div>`
+        : `<div class="paceMsg ${leftAfter<0?'bad':'good'}" style="margin-top:12px">
+             今月の残りが ¥${fmt(Math.abs(leftNow))}${leftNow<0?'超過':''} → <b>¥${fmt(Math.abs(leftAfter))}${leftAfter<0?'超過':''}</b></div>`;
+    })() : '';
+  box.innerHTML=`
+    <div class="muted" style="font-size:12px;font-weight:700">${parts.join('　')} をやめると</div>
+    <div class="big">¥${fmt(saved)} 浮く</div>
+    <div class="yr">1年続ければ ¥${fmt(saved*12)}</div>
+    <div class="canbuy">${canBuy(saved*12)}</div>
+    ${budgetLine}`;
+}
+/* 浮いた金額で何ができるかを示す。金額の実感を持ってもらうため */
+function canBuy(yen){
+  const items=[
+    [3000,'🎬 映画'],[8000,'👟 スニーカー'],[15000,'🎧 イヤホン'],
+    [30000,'✈️ 国内旅行'],[60000,'📱 スマホ買い替え'],[120000,'💻 ノートPC'],
+    [200000,'🌏 海外旅行']
+  ];
+  const hits=items.filter(([p])=>yen>=p).slice(-3);
+  if(!hits.length) return '';
+  return hits.map(([p,n])=>`<span>${n} ${Math.floor(yen/p)}回分</span>`).join('');
+}
+
 function aiCard(){
   return `<div class="card">
     <b style="font-size:15px">AIに相談する 🤖</b>
