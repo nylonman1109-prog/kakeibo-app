@@ -101,12 +101,14 @@
   .mic{position:absolute;inset:5px;width:110px;height:110px;border-radius:50%;background:var(--accent-soft);color:var(--accent);border:0;font-size:44px;padding:0}
   .mic.live{animation:pulse 1s infinite;background:var(--accent);color:#fff}
   @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(255,143,122,.5)}70%{box-shadow:0 0 0 22px rgba(255,143,122,0)}100%{box-shadow:0 0 0 0 rgba(255,143,122,0)}}
-  /* 残り時間のリング：聞いている間だけ減っていく */
-  .ring{position:absolute;inset:0;width:120px;height:120px;transform:rotate(-90deg);opacity:0;transition:opacity .2s}
+  /* 録音中を示すリング。時間制限ではなく「今つながっている」印としてゆっくり回す */
+  .ring{position:absolute;inset:0;width:120px;height:120px;opacity:0;transition:opacity .2s}
   .ring.on{opacity:1}
+  .ring.spin{animation:spin 2.4s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
   .ring-bg{fill:none;stroke:var(--line);stroke-width:5}
   .ring-fg{fill:none;stroke:var(--accent);stroke-width:5;stroke-linecap:round;
-           stroke-dasharray:339.3;stroke-dashoffset:0}
+           stroke-dasharray:85 255}
   .micstate{text-align:center;font-size:13px;font-weight:700;color:var(--sub);margin:12px 0 2px;min-height:20px}
   .micstate.live{color:var(--accent)}
   .heard{text-align:center;font-size:18px;font-weight:700;min-height:26px;margin:6px 0}
@@ -190,7 +192,7 @@
   <div id="paneVoice">
     <!-- ▼ 直接モード：アプリのマイクで直接聞き取る（使える端末のみ） -->
     <div id="modeDirect">
-      <p class="muted" style="text-align:center">「消しゴム 100円」のように話してください</p>
+      <p class="muted" style="text-align:center">タップして話す →&nbsp; もう一度タップで終了</p>
       <div class="micwrap">
         <svg class="ring" viewBox="0 0 120 120"><circle class="ring-bg" cx="60" cy="60" r="54"/>
           <circle class="ring-fg" id="ringFg" cx="60" cy="60" r="54"/></svg>
@@ -617,28 +619,45 @@ function setState(t,live){
   el.textContent=t; el.classList.toggle('live',!!live);
 }
 /* マイクを押したときの動き
-   ・止まっている → 聞き取り開始
-   ・聞いている   → そこで確定（聞き取れていれば内容を採用する。捨てない） */
+   ・止まっている → 聞き取り開始（もう一度押すまで止まらない）
+   ・聞いている   → そこで終了して、聞き取れた内容を確定する */
 function toggleMic(){ listening ? finishMic(true) : startMic(); }
 
 /* ★重要★ この関数は async にしないこと。
    iOS Safari は「タップした流れが途切れずに」start() が呼ばれた時だけ音声を許可する。
    await を挟むとユーザー操作の文脈が切れ、無反応のまま終わる（実機で発生した不具合）。 */
-let micStartAt=0;
+let micStartAt=0;      // 今のひと区切りを開始した時刻
+let sessionAt=0;       // 最初にタップした時刻
+let deadRuns=0;        // 「音を拾わないまま即終了」が続いた回数
+let elapsedT=null;     // 経過時間の表示用
+const MAX_MS=60000;    // 万一止め忘れても1分で自動終了する安全装置
+
+/* 利用者がタップして開始。ここから「もう一度タップ」まで聞き続ける */
 function startMic(){
-  // 起動しても必ず失敗する条件なら、待たせずに確実な方式へ
   if(IOS_BLOCKED){ fallbackToDict(iosBlockedReason()); return; }
   if(!SR){ fallbackToDict('この端末はアプリからのマイク起動に対応していません。'); return; }
-  finalTxt=''; gotResult=false; gotAudio=false; micStartAt=Date.now();
+  finalTxt=''; gotResult=false; gotAudio=false; deadRuns=0;
+  sessionAt=Date.now();
   document.getElementById('voiceParsed').innerHTML='';
   setHeard('');
 
-  try{ rec=new SR(); }catch(e){ fallbackToDict('マイクを起動できませんでした。'); return; }
-  rec.lang='ja-JP'; rec.interimResults=VOICE.interim; rec.continuous=false; rec.maxAlternatives=1;
+  listening=true;
+  document.getElementById('micBtn').classList.add('live');
+  startElapsed();
+  if(!beginRun(true)) return;      // 1回目だけはタップの流れの中で起動する
+  resetGuard();
+}
 
-  rec.onstart=()=>{ setState('聞いています…　タップで確定',true); };
-  rec.onaudiostart=()=>{ gotAudio=true; };
-  rec.onspeechstart=()=>{ setState('聞き取っています…　タップで確定',true); };
+/* 認識のひと区切りを開始する。iOSは数秒で勝手に終わるので、
+   終わるたびにこれを呼び直して「押している間ずっと」を実現する。 */
+function beginRun(firstTime){
+  try{ rec=new SR(); }
+  catch(e){ stopMic(); fallbackToDict('マイクを起動できませんでした。'); return false; }
+  rec.lang='ja-JP'; rec.interimResults=VOICE.interim; rec.continuous=false; rec.maxAlternatives=1;
+  micStartAt=Date.now();
+
+  rec.onaudiostart=()=>{ gotAudio=true; deadRuns=0; };
+  rec.onspeechstart=()=>{ setState('聞き取っています…　もう一度タップで終了',true); };
   rec.onresult=e=>{
     gotResult=true;
     let interim='';
@@ -647,85 +666,86 @@ function startMic(){
       const r=e.results[i];
       if(r.isFinal) finalTxt+=r[0].transcript; else interim+=r[0].transcript;
     }
-    setHeard((finalTxt+interim) || '聞いています…');
+    setHeard((finalTxt+interim) || '');
     resetGuard();
-    if(finalTxt) finishMic();
+    // 自動では確定しない。利用者がもう一度タップするまで聞き続ける
   };
   rec.onerror=e=>{
     const err=(e&&e.error)||'unknown';
     lastErr=err;
     if(err==='not-allowed'||err==='service-not-allowed'){
-      fallbackToDict('マイクの使用が許可されていません。');
-    }else if(err==='no-speech'){
-      stopMic(); setState('聞き取れませんでした。もう一度どうぞ');
+      stopMic(); fallbackToDict('マイクの使用が許可されていません。');
     }else if(err==='network'){
-      fallbackToDict('音声認識サーバーに接続できませんでした。');
-    }else if(err==='aborted'){
-      stopMic();
-    }else{
-      fallbackToDict('この端末では音声認識を利用できませんでした（'+err+'）。');
+      stopMic(); fallbackToDict('音声認識サーバーに接続できませんでした。');
     }
+    // no-speech / aborted は無視。onend側で自動的に再開する
   };
-  /* 起動した直後に終わってしまう端末（iOSに多い）を検知する。
-     マイクが一度も開かないまま2秒未満で終了＝この端末では使えないと判断し、
-     以後は確実に動くキーボード方式で開くよう記憶する。 */
+  /* ひと区切りが終わったとき。利用者がまだ止めていなければ即座に再開する */
   rec.onend=()=>{
-    if(!listening) return;
-    const tooFast = (Date.now()-micStartAt) < 2000;
-    if(tooFast && !gotAudio && !finalTxt){
-      stopMic();
-      fallbackToDict('この端末ではアプリのマイクがすぐ止まってしまうため、確実な方法に切り替えました。');
-      return;
+    if(!listening) return;                       // 利用者が止めた＝再開しない
+    if(Date.now()-sessionAt > MAX_MS){ finishMic(); return; }
+    // 音を一度も拾えないまま短時間で終わるのが続く＝この端末では使えない
+    if(!gotAudio && (Date.now()-micStartAt) < 1200){
+      if(++deadRuns >= 3){
+        stopMic();
+        fallbackToDict('この端末ではアプリのマイクが働かないため、確実な方法に切り替えました。');
+        return;
+      }
     }
-    finishMic();
+    setTimeout(()=>{ if(listening) beginRun(false); }, 120);   // 間を空けずに繋ぎ直す
   };
 
-  // start() は同期的に。ここで例外＝この端末では起動不可
   try{ rec.start(); }
-  catch(e){ fallbackToDict('マイクを起動できませんでした。'); return; }
-
-  listening=true;
-  document.getElementById('micBtn').classList.add('live');
-  setState('聞いています…　タップで確定',true);
-  resetGuard();
+  catch(e){
+    if(firstTime){ stopMic(); fallbackToDict('マイクを起動できませんでした。'); return false; }
+    setTimeout(()=>{ if(listening) beginRun(false); }, 250);
+  }
+  return true;
 }
-/* 無音が続いたら自動で確定するまでの残り時間。声を検知するたびに満タンに戻す */
+
+/* 押している間、経過時間を出す（止め忘れ防止） */
+function startElapsed(){
+  clearInterval(elapsedT);
+  const tick=()=>{
+    if(!listening) return;
+    const s=Math.floor((Date.now()-sessionAt)/1000);
+    setState(`● 録音中 ${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}　もう一度タップで終了`,true);
+  };
+  tick(); elapsedT=setInterval(tick,1000);
+}
+
+/* 最後に声を検知してからの安全タイマー（止め忘れ対策のみ。自動確定はしない） */
 function resetGuard(){
   clearTimeout(guardT);
-  guardT=setTimeout(()=>{ if(listening) finishMic(); }, VOICE.guardMs);
+  guardT=setTimeout(()=>{ if(listening) finishMic(); }, MAX_MS);
   startRing();
 }
 function startRing(){
   const ring=document.getElementById('ringFg');
   const wrap=document.querySelector('.ring');
   if(!ring||!wrap) return;
-  wrap.classList.add('on');
-  ring.style.transition='none'; ring.style.strokeDashoffset='0';
-  void ring.getBoundingClientRect();  // 変更を確定させてからアニメを始める
-  ring.style.transition=`stroke-dashoffset ${VOICE.guardMs}ms linear`;
-  ring.style.strokeDashoffset='339.3';
+  wrap.classList.add('on','spin');   // 録音中を示してぐるぐる回す（時間制限ではない）
 }
 function stopRing(){
-  const ring=document.getElementById('ringFg');
   const wrap=document.querySelector('.ring');
-  if(!ring||!wrap) return;
-  wrap.classList.remove('on');
-  ring.style.transition='none'; ring.style.strokeDashoffset='0';
+  if(wrap) wrap.classList.remove('on','spin');
 }
 /* byUser=true … 利用者が自分でマイクを押して止めた場合 */
 function finishMic(byUser){
   const t=finalTxt.trim();
   stopMic();
   if(t){ parseVoice(t); return; }              // 聞き取れていれば採用
-  if(byUser && !gotAudio){ setHeard(''); return; }  // 話す前に止めた＝ただの取り消し
+  if(byUser && !gotResult){ setHeard(''); return; }  // 何も話さず止めた＝ただの取り消し
   setHeard('');
   // なぜ拾えなかったかで案内を変える
   if(!gotAudio && !gotResult) fallbackToDict('マイクが反応しませんでした。');
   else setState('聞き取れませんでした。もう一度どうぞ');
 }
 function stopMic(){
-  listening=false; clearTimeout(guardT); stopRing();
+  listening=false;                       // 先に降ろす。これでonendが再開しなくなる
+  clearTimeout(guardT); clearInterval(elapsedT); stopRing();
   try{ rec && rec.stop(); }catch(e){}
+  try{ rec && rec.abort && rec.abort(); }catch(e){}
   const b=document.getElementById('micBtn'); if(b) b.classList.remove('live');
   setState('タップして話しはじめる');
 }
