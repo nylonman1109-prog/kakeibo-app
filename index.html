@@ -429,7 +429,8 @@ let DB = load();
 function load(){
   let d=null;
   try{const r=localStorage.getItem(KEY); if(r) d=JSON.parse(r);}catch(e){}
-  if(!d) d=seed();
+  // 初回は空っぽから始める。デモを見せたいときだけ URL に ?demo=1 を付ける
+  if(!d) d = /[?&]demo=1/.test(location.search) ? demoData() : seed();
   // 後から足した項目を補う（前の版で保存したデータもそのまま使えるように）
   if(!d.budget) d.budget={total:0, cats:{}};
   if(!d.budget.cats) d.budget.cats={};
@@ -437,7 +438,12 @@ function load(){
   return d;
 }
 function save(){ localStorage.setItem(KEY, JSON.stringify(DB)); }
-function seed(){
+/* まっさらな初期状態。渡した人がそのまま自分の記録を始められるようにする */
+function seed(){ return {items:[], budget:{total:0, cats:{}}, demo:false}; }
+
+/* デモ用のサンプル（?demo=1 のときだけ使う）
+   画面の見え方を見せたいとき用。ふだんの利用では入らない。 */
+function demoData(){
   const now=new Date();
   const items=[];
   let id=1;
@@ -458,7 +464,7 @@ function seed(){
   add(0,6,'消しゴム・ノート',430,'daily'); add(0,9,'ガソリン',4500,'trans');
   add(0,11,'居酒屋 同僚と',3800,'eatout',false); add(0,14,'牛丼',560,'eatout',true);
   add(0,16,'スーパー',4120,'food'); add(0,19,'ゲーム課金',1500,'fun');
-  // demo:true ＝ お試し用のサンプル。自分の記録を始めるときに一括で消せるようにする
+  // demo:true ＝ サンプル表示中の印。ホームに警告バナーが出て、ワンタップで全部消せる
   return {items, budget:{total:80000, cats:{eatout:15000, food:30000}}, demo:true};
 }
 /* サンプルを捨てて、まっさらな状態から始める */

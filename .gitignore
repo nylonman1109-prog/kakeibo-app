@@ -10,3 +10,8 @@ desktop.ini
 # 依存物・ビルド
 node_modules/
 dist/
+
+# 内輪の資料・開発用ページ（GitHub Pagesで公開されてしまうため外す。手元には残る）
+docs/
+engine-test.html
+CLAUDE-SECURITY-*/
