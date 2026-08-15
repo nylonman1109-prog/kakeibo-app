@@ -151,6 +151,17 @@
   .canbuy span{background:#fff;border:1px solid var(--line);border-radius:99px;padding:6px 11px;font-size:12px;font-weight:700}
   .badge{display:inline-block;background:var(--accent-soft);color:var(--accent);border-radius:99px;
          padding:3px 10px;font-size:11px;font-weight:800;margin-left:6px}
+  /* 使い方ページ */
+  .help-step{display:flex;gap:11px;align-items:flex-start;margin-top:12px;font-size:14px;line-height:1.65}
+  .help-ic{flex:0 0 auto;width:32px;height:32px;border-radius:11px;background:var(--accent-soft);
+           display:grid;place-items:center;font-size:16px}
+  /* サンプルデータの案内 */
+  .demobar{background:#fdf3e0;border:1px solid #f0d9a8;border-radius:16px;padding:13px 15px;margin-bottom:14px}
+  .demobar b{font-size:14px;color:#a8741a}
+  .demobar p{margin:5px 0 10px;font-size:12.5px;color:#8a6a2a;line-height:1.6}
+  .demobar button{width:100%;border:0;background:#fff;color:#a8741a;border:1.5px solid #e6c983;
+                  border-radius:12px;padding:11px;font-weight:800;font-size:14px;font-family:inherit}
+  .danger{background:#fff;color:#d0503a;border:1.5px solid #f0b5a8;box-shadow:none}
 </style>
 </head>
 <body>
@@ -163,6 +174,7 @@
     <div class="total-amt"><span class="yen">¥</span><span id="homeTotal">0</span></div>
     <div id="homeVs" class="vs">先月比 —</div>
   </div>
+  <div id="demoBar"></div>
   <div id="budgetCard"></div>
   <div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
@@ -189,10 +201,75 @@
     <button class="btn ghost" onclick="saveCatBudget()">分類ごとの予算を保存</button>
   </div>
   <div class="card">
-    <b style="font-size:15px">データ</b>
-    <p class="muted" style="margin:4px 0 10px;font-size:13px">記録はこの端末の中だけに保存されています。</p>
-    <button class="btn ghost" onclick="exportCSV()">📄 CSVで書き出す</button>
+    <b style="font-size:15px">バックアップ</b>
+    <p class="muted" style="margin:4px 0 10px;font-size:13px">記録はこの端末の中だけに保存されています。<b>機種変更やブラウザの履歴削除で消えます。</b>ときどき書き出しておくと安心です。</p>
+    <button class="btn ghost" onclick="exportCSV()">📄 CSVに書き出す（保存）</button>
+    <input type="file" accept=".csv,text/csv" id="csvFile" onchange="importCSV(this)" style="display:none">
+    <button class="btn ghost" onclick="document.getElementById('csvFile').click()" style="margin-top:10px">📂 CSVから復元する</button>
   </div>
+  <div id="demoCard"></div>
+  <div class="card">
+    <b style="font-size:15px">使い方</b>
+    <p class="muted" style="margin:4px 0 10px;font-size:13px">できること・入力のコツをまとめています。</p>
+    <button class="btn ghost" onclick="go('help')">📖 使い方を見る</button>
+  </div>
+</section>
+
+<!-- 使い方 -->
+<section id="help" class="screen">
+  <h1>使い方</h1>
+  <div class="card">
+    <b style="font-size:15px">この家計簿がやりたいこと</b>
+    <p style="margin:8px 0 0;font-size:14px">続かない理由はいつも「入力が面倒」。だからこのアプリは
+      <b>しゃべる・撮る・打つ</b>の3つを、どれも数秒で終わるようにしています。</p>
+  </div>
+
+  <div class="card">
+    <b style="font-size:15px">1. 記録する（右下の ＋ ）</b>
+    <div class="help-step"><span class="help-ic">🎤</span><div>
+      <b>音声</b>　マイクを押して「ラーメン 980円」のように話し、もう一度押して終了。
+      品名・金額・分類を自動で判定します。<br>
+      <span class="muted">コツ：金額のあとに「円」を付けると確実です。</span></div></div>
+    <div class="help-step"><span class="help-ic">📷</span><div>
+      <b>レシート</b>　撮るだけ。合計金額とお店の名前を読み取り、分類まで推測します。</div></div>
+    <div class="help-step"><span class="help-ic">✏️</span><div>
+      <b>手入力</b>　品名・金額・分類を直接。<b>日付を変えれば昨日以前の分</b>も入れられます。</div></div>
+    <div class="note">どの方法でも、追加する前に確認画面が出ます。分類がちがっていたらその場で押し直せます。</div>
+  </div>
+
+  <div class="card">
+    <b style="font-size:15px">2. 直す・消す（履歴から）</b>
+    <p style="margin:8px 0 0;font-size:14px">履歴の記録をタップすると編集画面が開きます。金額・品名・日付・分類を直せます。
+      消したいときは同じ画面の下にある「この記録を削除」から。</p>
+  </div>
+
+  <div class="card">
+    <b style="font-size:15px">3. 予算を決める（設定）</b>
+    <p style="margin:8px 0 0;font-size:14px">ひと月の上限を入れると、ホームに<b>「あといくら使えるか」「1日あたりいくらまでか」</b>が出ます。
+      使うペースが早いときは、月末にいくらオーバーしそうかも教えます。</p>
+    <p class="muted" style="margin:8px 0 0;font-size:13px">分類ごと（外食だけ・食費だけ など）の上限は任意です。空欄なら管理しません。</p>
+  </div>
+
+  <div class="card">
+    <b style="font-size:15px">4. 眺める・減らす（分析）</b>
+    <p style="margin:8px 0 0;font-size:14px">
+      <b>月の比較</b>…今月と先月を分類ごとに。増えた分類が赤で出ます。<br>
+      <b>推移</b>…直近6ヶ月の棒グラフと月平均。<br>
+      <b>シミュ</b>…つまみを動かして「外食を3回減らしたら？」を試算。浮く金額と1年ぶんが出ます。</p>
+    <p class="muted" style="margin:8px 0 0;font-size:13px">「今月の家計をコピー」を押すと、集計文がコピーされます。ChatGPTやClaudeに貼れば節約の相談ができます。</p>
+  </div>
+
+  <div class="card">
+    <b style="font-size:15px">5. 大事なこと</b>
+    <div class="help-step"><span class="help-ic">🔒</span><div>
+      記録は<b>あなたのスマホの中だけ</b>に保存されます。どこにも送られず、作った側からも中身は見えません。</div></div>
+    <div class="help-step"><span class="help-ic">💾</span><div>
+      裏返すと、<b>機種変更やブラウザの履歴削除で消えます。</b>設定から「CSVに書き出す」でときどき控えを。</div></div>
+    <div class="help-step"><span class="help-ic">📱</span><div>
+      <b>iPhoneの方へ：</b>ホーム画面のアイコンから開くと、Appleの制限でアプリのマイクが使えません。
+      音声を使う日は<b>Safariで開いて</b>ください（ホーム画面から開いた場合も、キーボードの🎤で入力できます）。</div></div>
+  </div>
+  <button class="btn ghost" onclick="go('conf')" style="margin-bottom:10px">設定に戻る</button>
 </section>
 
 <!-- 履歴 -->
@@ -281,6 +358,8 @@
     <input id="mName" placeholder="例）消しゴム">
     <label>金額（円）</label>
     <input id="mAmt" type="number" inputmode="numeric" placeholder="100">
+    <label>日付</label>
+    <input id="mDate" type="date">
     <label>分類</label>
     <div class="catpick" id="mCatPick"></div>
     <div id="mAloneWrap" style="display:none">
@@ -292,6 +371,30 @@
     </div>
     <button class="btn" onclick="saveManual()">追加する</button>
   </div>
+</div>
+
+<!-- 記録の編集シート -->
+<div class="sheet-bg" id="editBg" onclick="closeEdit()"></div>
+<div class="sheet" id="editSheet">
+  <div class="grip"></div>
+  <b style="font-size:16px">記録を直す</b>
+  <label>品名・内容</label>
+  <input id="eName">
+  <label>金額（円）</label>
+  <input id="eAmt" type="number" inputmode="numeric">
+  <label>日付</label>
+  <input id="eDate" type="date">
+  <label>分類</label>
+  <div class="catpick" id="eCatPick"></div>
+  <div id="eAloneWrap" style="display:none">
+    <label>だれと？（シミュレーション用）</label>
+    <div class="seg-small">
+      <button id="eAlone1" onclick="eSetAlone(true)">🙋 一人</button>
+      <button id="eAlone0" onclick="eSetAlone(false)">👥 複数</button>
+    </div>
+  </div>
+  <button class="btn" onclick="saveEdit()">この内容に直す</button>
+  <button class="btn ghost danger" onclick="delFromEdit()" style="margin-top:10px">この記録を削除</button>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -312,7 +415,7 @@ const KW = [
   ['food',  ['スーパー','マート','米','肉','野菜','牛乳','卵','パン','弁当','惣菜','食品','青果','鮮魚']],
   ['daily', ['洗剤','ティッシュ','トイレット','消しゴム','ノート','ペン','文具','シャンプー','歯','ドラッグ','薬局','日用']],
   ['trans', ['電車','バス','ガソリン','タクシー','駐車','切符','suica','pasmo','高速']],
-  ['fun',   ['映画','ゲーム','本','漫画','カラオケ','ライブ','遊園地','課金','netflix','ゲーセn']],
+  ['fun',   ['映画','ゲーム','本','漫画','カラオケ','ライブ','遊園地','課金','netflix','ゲーセン','ボウリング']],
 ];
 function guessCat(text){
   const t=(text||'').toLowerCase();
@@ -330,6 +433,7 @@ function load(){
   // 後から足した項目を補う（前の版で保存したデータもそのまま使えるように）
   if(!d.budget) d.budget={total:0, cats:{}};
   if(!d.budget.cats) d.budget.cats={};
+  if(d.demo===undefined) d.demo=false;
   return d;
 }
 function save(){ localStorage.setItem(KEY, JSON.stringify(DB)); }
@@ -354,7 +458,14 @@ function seed(){
   add(0,6,'消しゴム・ノート',430,'daily'); add(0,9,'ガソリン',4500,'trans');
   add(0,11,'居酒屋 同僚と',3800,'eatout',false); add(0,14,'牛丼',560,'eatout',true);
   add(0,16,'スーパー',4120,'food'); add(0,19,'ゲーム課金',1500,'fun');
-  return {items, budget:{total:80000, cats:{eatout:15000, food:30000}}};
+  // demo:true ＝ お試し用のサンプル。自分の記録を始めるときに一括で消せるようにする
+  return {items, budget:{total:80000, cats:{eatout:15000, food:30000}}, demo:true};
+}
+/* サンプルを捨てて、まっさらな状態から始める */
+function clearDemo(){
+  if(!confirm('サンプルの記録と予算をすべて消して、まっさらから始めます。よろしいですか？')) return;
+  DB={items:[], budget:{total:0, cats:{}}, demo:false};
+  save(); go('home'); toast('まっさらにしました。＋から記録を始めましょう');
 }
 
 /* ===== 日付ユーティリティ（すべてローカル時刻で統一：UTC変換で月がズレるのを防ぐ） ===== */
@@ -373,8 +484,11 @@ function fmt(n){ return n.toLocaleString('ja-JP'); }
 
 /* ===== 画面遷移 ===== */
 function go(id){
+  const navId = id==='help' ? 'conf' : id;   // 使い方は設定の中の画面なので設定を光らせる
+  // 設定・使い方は読む画面なので、＋ボタンが文章に重ならないように隠す
+  document.querySelector('.fab').style.display = (id==='conf'||id==='help') ? 'none' : '';
   document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('active',s.id===id));
-  document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('on',b.dataset.nav===id));
+  document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('on',b.dataset.nav===navId));
   if(id==='home') renderHome();
   if(id==='log') renderLog();
   if(id==='stat') renderStat();
@@ -480,6 +594,7 @@ function renderHome(){
   for(const k in CATS) by[k]=0;
   cur.forEach(i=>by[i.cat]+=i.amount);
   const max=Math.max(1,...Object.values(by));
+  renderDemoBar();
   renderBudget(tc, by);
   const box=document.getElementById('homeCats');
   const rows=Object.keys(CATS).filter(k=>by[k]>0).sort((a,b)=>by[b]-by[a]);
@@ -495,8 +610,25 @@ function renderHome(){
   }).join('');
 }
 
+/* サンプル表示中の案内。使い始める前に必ず消してもらうための入口 */
+function renderDemoBar(){
+  const box=document.getElementById('demoBar');
+  if(!DB.demo){ box.innerHTML=''; return; }
+  box.innerHTML=`<div class="demobar">
+    <b>⚠ いま出ているのはサンプルです</b>
+    <p>使い心地を試すための架空の記録が入っています。自分の記録を始めるときは、いったん全部消してください。</p>
+    <button onclick="clearDemo()">サンプルを消して始める</button>
+  </div>`;
+}
+
 /* ===== 設定 ===== */
 function renderConf(){
+  const dc=document.getElementById('demoCard');
+  dc.innerHTML = DB.demo ? `<div class="card">
+      <b style="font-size:15px">サンプルの記録</b>
+      <p class="muted" style="margin:4px 0 10px;font-size:13px">お試し用の架空データが入っています。自分の記録を始めるときに消してください。</p>
+      <button class="btn ghost danger" onclick="clearDemo()">サンプルを消してまっさらにする</button>
+    </div>` : '';
   document.getElementById('bTotal').value = DB.budget.total || '';
   const cur=itemsOf(curYM());
   const by={}; for(const k in CATS) by[k]=0;
@@ -542,6 +674,55 @@ function exportCSV(){
   setTimeout(()=>URL.revokeObjectURL(a.href),3000);
   toast('CSVを書き出しました');
 }
+/* 書き出したCSVを読み戻す（機種変更・データ消失からの復元）
+   1行 = "日付","品名","金額","分類","だれと" */
+function parseCSV(text){
+  const rows=[]; let row=[], cell='', q=false;
+  for(let i=0;i<text.length;i++){
+    const c=text[i];
+    if(q){
+      if(c==='"'){ if(text[i+1]==='"'){ cell+='"'; i++; } else q=false; }
+      else cell+=c;
+    }else{
+      if(c==='"') q=true;
+      else if(c===','){ row.push(cell); cell=''; }
+      else if(c==='\n'){ row.push(cell); rows.push(row); row=[]; cell=''; }
+      else if(c!=='\r') cell+=c;
+    }
+  }
+  if(cell||row.length){ row.push(cell); rows.push(row); }
+  return rows.filter(r=>r.some(c=>c!==''));
+}
+function importCSV(input){
+  const f=input.files&&input.files[0];
+  input.value='';                                  // 同じファイルをもう一度選べるように
+  if(!f) return;
+  const rd=new FileReader();
+  rd.onload=()=>{
+    try{
+      const txt=String(rd.result).replace(/^﻿/,'');
+      const rows=parseCSV(txt);
+      if(!rows.length){ toast('中身が読めませんでした'); return; }
+      if(String(rows[0][0]).indexOf('日付')>=0) rows.shift();   // 見出し行を飛ばす
+      const name2key={}; for(const k in CATS) name2key[CATS[k].name]=k;
+      const items=[]; let id=1;
+      rows.forEach(r=>{
+        const date=String(r[0]||'').trim();
+        const amount=parseInt(String(r[2]||'').replace(/[^0-9]/g,''),10);
+        if(!/^\d{4}-\d{2}-\d{2}$/.test(date) || !amount) return;
+        const who=String(r[4]||'').trim();
+        items.push({id:id++, date, name:String(r[1]||'').trim()||'買い物',
+                    amount, cat:name2key[String(r[3]||'').trim()]||'other',
+                    alone: who==='一人'?true : who==='複数'?false : null});
+      });
+      if(!items.length){ toast('取り込める記録がありませんでした'); return; }
+      if(!confirm(`${items.length}件を読み込みます。いまの記録は置き換わります。よろしいですか？`)) return;
+      DB.items=items; DB.demo=false; save(); go('home');
+      toast(`${items.length}件を復元しました ✓`);
+    }catch(e){ toast('読み込みに失敗しました'); }
+  };
+  rd.readAsText(f);
+}
 
 /* ===== 履歴 ===== */
 let logYM=null;
@@ -556,16 +737,60 @@ function renderLog(){
   list.innerHTML=arr.map(i=>{
     const c=CATS[i.cat];
     const alone = i.cat==='eatout'&&i.alone!==null ? `<span class="chip">${i.alone?'🙋一人':'👥複数'}</span>`:'';
-    return `<div class="item" onclick="delItem(${i.id})">
+    return `<div class="item" onclick="openEdit(${i.id})">
       <div class="cat-ic" style="background:${c.color}22">${c.emoji}</div>
       <div class="nm"><div class="t">${esc(i.name)}${alone}</div><div class="d">${i.date.slice(5).replace('-','/')} ・ ${c.name}</div></div>
       <div class="amt">¥${fmt(i.amount)}</div>
     </div>`;
   }).join('');
 }
-function delItem(id){
+
+/* ===== 記録を直す =====
+   前は行をタップした瞬間に削除の確認が出ていた。誤タップで消えるうえ、
+   打ち間違えた金額を直せなかったので、編集画面を開く形に変えた。 */
+let editId=null, eCat='food', eAlone=true;
+function openEdit(id){
+  const it=DB.items.find(i=>i.id===id);
+  if(!it) return;
+  editId=id; eCat=it.cat; eAlone=it.alone!==false;
+  document.getElementById('eName').value=it.name;
+  document.getElementById('eAmt').value=it.amount;
+  document.getElementById('eDate').value=it.date;
+  buildECatPick();
+  document.getElementById('editBg').classList.add('show');
+  document.getElementById('editSheet').classList.add('show');
+}
+function closeEdit(){
+  document.getElementById('editBg').classList.remove('show');
+  document.getElementById('editSheet').classList.remove('show');
+}
+function buildECatPick(){
+  document.getElementById('eCatPick').innerHTML=Object.keys(CATS).map(k=>
+    `<button class="${k===eCat?'on':''}" onclick="ePick('${k}')">${CATS[k].emoji} ${CATS[k].name}</button>`).join('');
+  document.getElementById('eAloneWrap').style.display=eCat==='eatout'?'':'none';
+  eSetAlone(eAlone);
+}
+function ePick(k){ eCat=k; buildECatPick(); }
+function eSetAlone(v){ eAlone=v;
+  document.getElementById('eAlone1').classList.toggle('on',v);
+  document.getElementById('eAlone0').classList.toggle('on',!v); }
+function saveEdit(){
+  const it=DB.items.find(i=>i.id===editId);
+  if(!it) return;
+  const amt=parseInt(document.getElementById('eAmt').value,10);
+  if(!amt||amt<=0){ toast('金額を入れてね'); return; }
+  const d=document.getElementById('eDate').value;
+  it.name=document.getElementById('eName').value.trim()||CATS[eCat].name;
+  it.amount=amt;
+  if(/^\d{4}-\d{2}-\d{2}$/.test(d)) it.date=d;
+  it.cat=eCat;
+  it.alone = eCat==='eatout' ? eAlone : null;
+  save(); closeEdit(); renderLog(); toast('直しました ✓');
+}
+function delFromEdit(){
   if(!confirm('この記録を削除しますか？')) return;
-  DB.items=DB.items.filter(i=>i.id!==id); save(); renderLog(); toast('削除しました');
+  DB.items=DB.items.filter(i=>i.id!==editId);
+  save(); closeEdit(); renderLog(); toast('削除しました');
 }
 
 /* ===== 分析 ===== */
@@ -750,7 +975,7 @@ function inTab(t){
   document.getElementById('paneVoice').style.display=t==='voice'?'':'none';
   document.getElementById('paneReceipt').style.display=t==='receipt'?'':'none';
   document.getElementById('paneManual').style.display=t==='manual'?'':'none';
-  if(t==='manual') buildCatPick();
+  if(t==='manual'){ buildCatPick(); document.getElementById('mDate').value=dstr(NOW()); }
   if(t==='voice'){
     setHeard(''); setState('タップして話しはじめる'); stopRing();
     document.getElementById('voiceParsed').innerHTML='';
@@ -780,15 +1005,17 @@ function saveManual(){
   const name=document.getElementById('mName').value.trim()||CATS[mCat].name;
   const amt=parseInt(document.getElementById('mAmt').value,10);
   if(!amt||amt<=0){ toast('金額を入れてね'); return; }
-  addItem(name,amt,mCat, mCat==='eatout'?mAlone:null);
+  addItem(name,amt,mCat, mCat==='eatout'?mAlone:null, document.getElementById('mDate').value);
   document.getElementById('mName').value=''; document.getElementById('mAmt').value='';
   closeSheet(); toast('追加しました ✓');
 }
 
 /* ---- 共通追加 ---- */
-function addItem(name,amount,cat,alone){
+/* date を省略すると今日。手入力・レシートでは過去の日付も入れられる */
+function addItem(name,amount,cat,alone,date){
   const id=Math.max(0,...DB.items.map(i=>i.id))+1;
-  DB.items.push({id, date:dstr(NOW()), name, amount, cat, alone: alone===undefined?null:alone});
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(date||'') ? date : dstr(NOW());
+  DB.items.push({id, date:d, name, amount, cat, alone: alone===undefined?null:alone});
   save(); go('home');
 }
 
@@ -1022,40 +1249,116 @@ function useDict(){
   parseVoice(t);
 }
 
-/* 聞き取った文から「品名」と「金額」を取り出す */
+/* 聞き取った文から「品名」と「金額」を取り出す
+   「コンビニ2個で430円」のように数字が2つ出る言い方があるので、
+   まず“円が付いた数字”を探し、無ければ最後の数字を金額とみなす。 */
 function parseVoice(text){
   setHeard(text);
   // 全角数字→半角、カンマ除去。「100円」「千円」ではなく数字表記を想定
   const norm=text.replace(/[０-９]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0)).replace(/,/g,'');
-  const m=norm.match(/(\d+)\s*(?:円|えん)?/);
-  const amt=m?parseInt(m[1],10):0;
-  let name=norm.replace(/(\d+)\s*(?:円|えん)?/,'').replace(/[をがはにでのと、。\s]/g,'').trim();
+  let amt=0, hit='';
+  const yen=[...norm.matchAll(/(\d+)\s*(?:円|えん|エン)/g)];
+  if(yen.length){                       // 「円」付きが最優先。複数あれば最後（合計を言い直す言い方に合う）
+    const m=yen[yen.length-1];
+    amt=parseInt(m[1],10); hit=m[0];
+  }else{
+    const nums=[...norm.matchAll(/\d+/g)];
+    if(nums.length){ const m=nums[nums.length-1]; amt=parseInt(m[0],10); hit=m[0]; }
+  }
+  let name=(hit?norm.replace(hit,''):norm)
+    .replace(/\d+\s*(?:個|コ|本|枚|杯|人|人前)/g,'')     // 「2個」などの数量は品名から外す
+    .replace(/[をがはにでのと、。\s]/g,'').trim();
   if(!name) name='買い物';
   showParsed('voiceParsed', name, amt, guessCat(text));
 }
 
-/* ---- レシート撮影（モック：合計＋分類を推測して確認） ---- */
-function scanReceipt(){
+/* ===== レシート読み取り =====
+   撮った写真を中継サーバー（GAS）に送り、AI（Gemini）に
+   「お店・合計・日付・分類」を読ませて返してもらう。
+   APIキーは中継サーバー側に置いてあるので、このファイルには入っていない。
+   写真は読み取りのその場かぎりで、どこにも保存しない。 */
+const OCR_URL = '';   // ← GASウェブアプリのURLをここに貼る（末尾 /exec）
+
+/* 送る前に長辺1280pxまで縮める。通信が軽くなり、読み取り精度もほぼ落ちない */
+function shrinkImage(file, maxSide){
+  return new Promise((resolve,reject)=>{
+    const rd=new FileReader();
+    rd.onerror=()=>reject(new Error('画像を読み込めませんでした'));
+    rd.onload=()=>{
+      const img=new Image();
+      img.onerror=()=>reject(new Error('画像を開けませんでした'));
+      img.onload=()=>{
+        const scale=Math.min(1, maxSide/Math.max(img.width,img.height));
+        const cv=document.createElement('canvas');
+        cv.width=Math.round(img.width*scale); cv.height=Math.round(img.height*scale);
+        cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);
+        resolve(cv.toDataURL('image/jpeg',0.8).split(',')[1]);   // base64部分だけ返す
+      };
+      img.src=rd.result;
+    };
+    rd.readAsDataURL(file);
+  });
+}
+function recError(msg){
+  document.getElementById('recParsed').innerHTML=
+    `<div class="note">${esc(msg)}</div>
+     <button class="btn ghost" onclick="inTab('manual')">✏️ 手入力で記録する</button>`;
+}
+async function scanReceipt(){
+  const input=document.getElementById('recFile');
+  const file=(input.files||[])[0];
+  input.value='';                     // 同じ写真をもう一度選び直せるように空にしておく
+  if(!file) return;
   const box=document.getElementById('recParsed');
-  box.innerHTML='<div class="scan"><div class="big">🔍</div><div style="margin-top:8px">読み取り中…</div></div>';
-  // 実機ではここでOCR。モックはそれっぽい結果を生成
-  setTimeout(()=>{
-    const shops=[['スーパーまるみ',4820,'food'],['ドラッグ薬局',1680,'daily'],['ラーメン花',980,'eatout'],['コンビニ',540,'food']];
-    const pick=shops[Math.floor(Math.random()*shops.length)];
-    showParsed('recParsed', pick[0], pick[1], pick[2], true);
-  },900);
+  if(!OCR_URL){
+    recError('レシートの読み取りはただいま準備中です。手入力をお使いください。');
+    return;
+  }
+  box.innerHTML='<div class="scan"><div class="big">🔍</div><div style="margin-top:8px">読み取り中…</div>'+
+                '<div style="font-size:12px;margin-top:4px">5秒ほどかかります</div></div>';
+  try{
+    const b64=await shrinkImage(file,1280);
+    const ctrl=new AbortController();
+    const to=setTimeout(()=>ctrl.abort(),25000);        // 返ってこないまま待たせ続けない
+    const res=await fetch(OCR_URL,{
+      method:'POST',
+      headers:{'Content-Type':'text/plain;charset=utf-8'},  // 単純リクエストにしてCORSの追加確認を避ける
+      body:JSON.stringify({image:b64}),
+      signal:ctrl.signal
+    });
+    clearTimeout(to);
+    if(!res.ok) throw new Error('サーバーが応答しませんでした（'+res.status+'）');
+    const j=await res.json();
+    if(!j.ok) throw new Error(j.message||'読み取れませんでした');
+    const amt=parseInt(j.total,10)||0;
+    if(!amt){ recError('合計金額を読み取れませんでした。明るい場所で、レシート全体が入るように撮り直すか、手入力をお使いください。'); return; }
+    const cat = CATS[j.category] ? j.category : guessCat(j.shop||'');
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(j.date||'') ? j.date : dstr(NOW());
+    showParsed('recParsed', j.shop||'買い物', amt, cat, true, date);
+  }catch(err){
+    const m = err && err.name==='AbortError'
+      ? '時間がかかりすぎたため中断しました。電波の良い場所でもう一度お試しください。'
+      : '読み取りに失敗しました（'+((err&&err.message)||'原因不明')+'）。';
+    recError(m);
+  }
 }
 
-/* ---- 読み取り結果の確認カード（分類を直せる） ---- */
-let pName='',pAmt=0,pCat='other',pAlone=true;
-function showParsed(target,name,amt,cat,fromReceipt){
-  pName=name; pAmt=amt; pCat=cat; pAlone=true;
+/* ---- 読み取り結果の確認カード ----
+   読み取りは必ずしも当たらないので、追加する前にその場で直せるようにしている */
+let pCat='other',pAlone=true;
+function showParsed(target,name,amt,cat,fromReceipt,date){
+  pCat=cat; pAlone=true;
   const el=document.getElementById(target);
   el.innerHTML=`<div class="parsed">
-      <div class="ln"><span>内容</span><b>${esc(name)}</b></div>
-      <div class="ln"><span>金額</span><b>¥${fmt(amt)}</b></div>
-      <div class="ln"><span>分類（推測・変更可）</span></div>
-      <div class="catpick" id="pCatPick" style="margin-top:6px"></div>
+      <div class="muted" style="font-size:12px;font-weight:700">読み取りました。ちがっていたら直せます</div>
+      <label style="margin-top:8px">内容</label>
+      <input id="pName" value="${esc(name)}">
+      <label>金額（円）</label>
+      <input id="pAmt" type="number" inputmode="numeric" value="${amt||''}">
+      <label>日付</label>
+      <input id="pDate" type="date" value="${date||dstr(NOW())}">
+      <label>分類（推測・変更可）</label>
+      <div class="catpick" id="pCatPick"></div>
       <div id="pAloneWrap" style="margin-top:10px;display:none">
         <div class="muted" style="font-size:13px;font-weight:700">だれと？</div>
         <div class="seg-small" style="margin-top:6px">
@@ -1076,8 +1379,10 @@ function pSetAlone(v){ pAlone=v;
   document.getElementById('pAlone1').classList.toggle('on',v);
   document.getElementById('pAlone0').classList.toggle('on',!v); }
 function confirmParsed(){
-  if(!pAmt){ toast('金額が読めませんでした'); return; }
-  addItem(pName,pAmt,pCat, pCat==='eatout'?pAlone:null);
+  const amt=parseInt(document.getElementById('pAmt').value,10);
+  if(!amt||amt<=0){ toast('金額を入れてね'); return; }
+  const name=document.getElementById('pName').value.trim()||CATS[pCat].name;
+  addItem(name,amt,pCat, pCat==='eatout'?pAlone:null, document.getElementById('pDate').value);
   closeSheet(); toast('追加しました ✓');
 }
 
