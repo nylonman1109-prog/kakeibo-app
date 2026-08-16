@@ -22,6 +22,22 @@
 
 var MODEL = 'gemini-flash-latest';
 
+/* ── 濫用よけ ──
+   このURLはアプリのHTML（公開されている）に書かれるので、見つけようと思えば誰でも見つかる。
+   URLを拾った第三者に呼ばれても、こちらの請求が青天井にならないよう2つの蓋をしておく。
+   ふつうに家計簿として使うぶんには、まず当たらない数字にしてある。 */
+var MAX_IMAGE_CHARS = 3000000;  // 送られてきた画像の上限（base64で約2.2MB）
+                                // アプリは長辺1280pxに縮めて送るので通常は50万文字以下
+var DAILY_LIMIT = 300;          // 1日に読み取れる枚数の上限
+                                // 1人で1日300枚は使わない。足りなければこの数字を上げる
+
+/* 合言葉。アプリ側の OCR_TOKEN と同じ文字列にする。
+   このURLだけを拾って自動で叩いてくる相手を弾くためのもの。
+   アプリのHTMLは公開されているので、本気で探せば読めます。そこは承知のうえで、
+   本当の歯止めは上の DAILY_LIMIT と、Google Cloud 側のクォータ上限です。
+   空文字のままなら照合しません（動作確認中はこれでよい）。 */
+var SHARED_TOKEN = '';
+
 var PROMPT = [
   'あなたはレシートを読み取る係です。渡された画像は日本のお店のレシートです。',
   '次の項目だけを読み取り、JSONで返してください。',
@@ -47,9 +63,25 @@ function doPost(e) {
     if (!e || !e.postData || !e.postData.contents) {
       return reply({ ok: false, message: '写真が届きませんでした' });
     }
+    if (e.postData.contents.length > MAX_IMAGE_CHARS + 10000) {
+      return reply({ ok: false, message: '写真が大きすぎます。撮り直してください' });
+    }
     var req = JSON.parse(e.postData.contents);
-    if (!req.image) {
+    if (SHARED_TOKEN && req.token !== SHARED_TOKEN) {
+      return reply({ ok: false, message: 'アクセスが許可されていません' });
+    }
+    if (!req.image || typeof req.image !== 'string') {
       return reply({ ok: false, message: '写真が届きませんでした' });
+    }
+    if (req.image.length > MAX_IMAGE_CHARS) {
+      return reply({ ok: false, message: '写真が大きすぎます。撮り直してください' });
+    }
+    // base64以外の文字が混じっているものは受け付けない
+    if (!/^[A-Za-z0-9+/=\s]+$/.test(req.image)) {
+      return reply({ ok: false, message: '写真の形式が正しくありません' });
+    }
+    if (!withinDailyLimit()) {
+      return reply({ ok: false, message: '本日の読み取り上限に達しました。手入力をお使いください' });
     }
 
     var key = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
@@ -80,11 +112,14 @@ function doPost(e) {
       }
     };
 
+    // キーはURLではなくヘッダで送る。URLに入れると、通信エラーの文言にキーごと
+    // 混ざって実行ログに残ることがあるため。
     var res = UrlFetchApp.fetch(
-      'https://generativelanguage.googleapis.com/v1beta/models/' + MODEL + ':generateContent?key=' + encodeURIComponent(key),
+      'https://generativelanguage.googleapis.com/v1beta/models/' + MODEL + ':generateContent',
       {
         method: 'post',
         contentType: 'application/json',
+        headers: { 'x-goog-api-key': key },
         payload: JSON.stringify(payload),
         muteHttpExceptions: true
       }
@@ -93,7 +128,7 @@ function doPost(e) {
     var code = res.getResponseCode();
     if (code !== 200) {
       // 失敗の中身はサーバーのログにだけ残す（利用者には見せない）
-      console.error('Gemini error ' + code + ': ' + res.getContentText().slice(0, 500));
+      console.error('Gemini error ' + code + ': ' + mask(res.getContentText().slice(0, 500)));
       return reply({ ok: false, message: '読み取りサービスに接続できませんでした' });
     }
 
@@ -119,9 +154,16 @@ function doPost(e) {
     });
 
   } catch (err) {
-    console.error(err);
+    console.error(mask(String(err)));
     return reply({ ok: false, message: '読み取りに失敗しました' });
   }
+}
+
+/* ログに残す前に、万一まぎれ込んだAPIキーを伏せる */
+function mask(text) {
+  return String(text)
+    .replace(/AIza[0-9A-Za-z_\-]{10,}/g, 'AIza***')
+    .replace(/key=[^&\s"']+/g, 'key=***');
 }
 
 /* 動作確認用。ブラウザでURLを開いたときに出る */
@@ -129,6 +171,33 @@ function doGet() {
   return ContentService
     .createTextOutput('やさしい家計簿 レシート読み取り中継：稼働中')
     .setMimeType(ContentService.MimeType.TEXT);
+}
+
+/* 1日あたりの読み取り回数を数える。上限を超えたら false を返す。
+   日付が変わったら自動で0に戻る（古いカウンタが溜まらないよう1件で持ち回す）。 */
+function withinDailyLimit() {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(5000);            // 同時に来ても二重に数えないように
+  } catch (e) {
+    return true;                    // 数えられないときは通す（利用者を止めない側に倒す）
+  }
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var today = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
+    var usage;
+    try { usage = JSON.parse(props.getProperty('USAGE') || '{}'); } catch (e) { usage = {}; }
+    if (usage.date !== today) usage = { date: today, count: 0 };
+    if (usage.count >= DAILY_LIMIT) {
+      console.warn('1日の上限に達しました: ' + today + ' / ' + usage.count + '件');
+      return false;
+    }
+    usage.count++;
+    props.setProperty('USAGE', JSON.stringify(usage));
+    return true;
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function reply(obj) {

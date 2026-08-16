@@ -70,7 +70,16 @@ document.getElementById('env').innerHTML=rows.map(r=>{
   if(r[0]==='ホーム画面から起動'&&IS_IOS&&STANDALONE) cls='ng';
   if(r[0]==='ブラウザ'&&IS_IOS&&IOS_OTHER) cls='ng';
   return `<div class="row"><span>${r[0]}</span><b class="${cls}">${r[1]}</b></div>`;
-}).join('')+`<div class="row"><span>UA</span><b style="font-size:10px;color:#9a8f89">${UA}</b></div>`;
+}).join('');
+// UAは中身が読めない文字列なので、HTMLとして解釈させずそのまま文字として出す
+(function(){
+  const row=document.createElement('div'); row.className='row';
+  const lb=document.createElement('span'); lb.textContent='UA';
+  const val=document.createElement('b');
+  val.style.cssText='font-size:10px;color:#9a8f89'; val.textContent=UA;
+  row.appendChild(lb); row.appendChild(val);
+  document.getElementById('env').appendChild(row);
+})();
 
 /* 判定：この端末で音声が使えない決定的な理由があるか */
 let verdict='', vclass='v-ok';

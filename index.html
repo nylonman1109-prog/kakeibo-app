@@ -262,7 +262,13 @@
   <div class="card">
     <b style="font-size:15px">5. 大事なこと</b>
     <div class="help-step"><span class="help-ic">🔒</span><div>
-      記録は<b>あなたのスマホの中だけ</b>に保存されます。どこにも送られず、作った側からも中身は見えません。</div></div>
+      記録は<b>あなたのスマホの中だけ</b>に保存されます。家計の中身が誰かのサーバーに貯まることはなく、
+      このアプリを作った側からも見えません。</div></div>
+    <div class="help-step"><span class="help-ic">🌐</span><div>
+      ただし<b>音声とレシートだけは、読み取りのため外を通ります。</b>
+      話した声は Apple / Google の音声認識へ、レシートの写真は文字を読むため Google のAIへ送られます。
+      どちらも<b>その場かぎりで、保存はされません。</b><br>
+      <span class="muted">気になるときは手入力をお使いください。手入力だけなら通信は一切発生しません。</span></div></div>
     <div class="help-step"><span class="help-ic">💾</span><div>
       裏返すと、<b>機種変更やブラウザの履歴削除で消えます。</b>設定から「CSVに書き出す」でときどき控えを。</div></div>
     <div class="help-step"><span class="help-ic">📱</span><div>
@@ -486,6 +492,12 @@ function prevYM(){ const n=NOW(); return ymOf(new Date(n.getFullYear(),n.getMont
 function ymLabel(s){ const [y,m]=s.split('-'); return `${+m}月`; }
 function itemsOf(ymStr){ return DB.items.filter(i=>ym(i.date)===ymStr); }
 function sumOf(arr){ return arr.reduce((a,b)=>a+b.amount,0); }
+/* 分類ごとの合計。知らない分類が混じっても「その他」に寄せて、集計が壊れないようにする */
+function sumByCat(arr){
+  const by={}; for(const k in CATS) by[k]=0;
+  arr.forEach(i=>{ by[CATS[i.cat]?i.cat:'other'] += i.amount; });
+  return by;
+}
 function fmt(n){ return n.toLocaleString('ja-JP'); }
 
 /* ===== 画面遷移 ===== */
@@ -596,9 +608,7 @@ function renderHome(){
     else{ vs.className='vs'; vs.textContent=`▲ 先月より ¥${fmt(diff)} 多い (${pct}%増)`; }
   }
   // 分類集計
-  const by={};
-  for(const k in CATS) by[k]=0;
-  cur.forEach(i=>by[i.cat]+=i.amount);
+  const by=sumByCat(cur);
   const max=Math.max(1,...Object.values(by));
   renderDemoBar();
   renderBudget(tc, by);
@@ -636,9 +646,7 @@ function renderConf(){
       <button class="btn ghost danger" onclick="clearDemo()">サンプルを消してまっさらにする</button>
     </div>` : '';
   document.getElementById('bTotal').value = DB.budget.total || '';
-  const cur=itemsOf(curYM());
-  const by={}; for(const k in CATS) by[k]=0;
-  cur.forEach(i=>by[i.cat]+=i.amount);
+  const by=sumByCat(itemsOf(curYM()));
   document.getElementById('bCats').innerHTML=Object.keys(CATS).map(k=>{
     const c=CATS[k], v=DB.budget.cats[k]||'';
     return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:9px">
@@ -669,9 +677,12 @@ function saveCatBudget(){
 function exportCSV(){
   const rows=[['日付','品名','金額','分類','だれと']]
     .concat(DB.items.slice().sort((a,b)=>a.date.localeCompare(b.date))
-      .map(i=>[i.date, i.name, i.amount, CATS[i.cat].name,
+      .map(i=>[i.date, i.name, i.amount, (CATS[i.cat]||CATS.other).name,
                i.alone===null?'':(i.alone?'一人':'複数')]));
-  const csv=rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\r\n');
+  // = や + で始まる品名は、表計算ソフトが数式として実行してしまう。
+  // 先頭に ' を付けて文字として扱わせる（読み戻すときに外す）
+  const safe=c=>{ const s=String(c); return /^[=+\-@\t\r]/.test(s) ? "'"+s : s; };
+  const csv=rows.map(r=>r.map(c=>`"${safe(c).replace(/"/g,'""')}"`).join(',')).join('\r\n');
   const blob=new Blob([new Uint8Array([0xEF,0xBB,0xBF]), csv],{type:'text/csv'});  // Excelで文字化けしない
   const a=document.createElement('a');
   a.href=URL.createObjectURL(blob);
@@ -697,6 +708,9 @@ function parseCSV(text){
     }
   }
   if(cell||row.length){ row.push(cell); rows.push(row); }
+  // 引用符が閉じていないファイルは、後ろの行が1セルに飲み込まれて黙って消える。
+  // 気づかないまま既存の記録を置き換えてしまうので、そのときは取り込み自体をやめる。
+  if(q) throw new Error('ファイルが途中で切れています');
   return rows.filter(r=>r.some(c=>c!==''));
 }
 function importCSV(input){
@@ -710,22 +724,33 @@ function importCSV(input){
       const rows=parseCSV(txt);
       if(!rows.length){ toast('中身が読めませんでした'); return; }
       if(String(rows[0][0]).indexOf('日付')>=0) rows.shift();   // 見出し行を飛ばす
-      const name2key={}; for(const k in CATS) name2key[CATS[k].name]=k;
-      const items=[]; let id=1;
+      // 継承プロパティ（constructor など）に当たらない素の対応表にする
+      const name2key=Object.create(null);
+      for(const k in CATS) name2key[CATS[k].name]=k;
+      const items=[]; let id=1; let skipped=0;
       rows.forEach(r=>{
         const date=String(r[0]||'').trim();
         const amount=parseInt(String(r[2]||'').replace(/[^0-9]/g,''),10);
-        if(!/^\d{4}-\d{2}-\d{2}$/.test(date) || !amount) return;
+        // 桁が多すぎる数字は parseInt が Infinity になり、保存後に表示が壊れる
+        if(!/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+           !Number.isFinite(amount) || amount<=0 || amount>=1e12){ skipped++; return; }
         const who=String(r[4]||'').trim();
-        items.push({id:id++, date, name:String(r[1]||'').trim()||'買い物',
-                    amount, cat:name2key[String(r[3]||'').trim()]||'other',
+        const catName=String(r[3]||'').trim();
+        // 書き出し時に付けた数式よけの ' を外して元の品名に戻す
+        const name=String(r[1]||'').replace(/^'/,'').trim()||'買い物';
+        items.push({id:id++, date, name, amount,
+                    cat:name2key[catName]||'other',
                     alone: who==='一人'?true : who==='複数'?false : null});
       });
       if(!items.length){ toast('取り込める記録がありませんでした'); return; }
-      if(!confirm(`${items.length}件を読み込みます。いまの記録は置き換わります。よろしいですか？`)) return;
+      if(!confirm(`${items.length}件を読み込みます。`+
+                  (skipped?`（読めなかった行が${skipped}件あります）`:'')+
+                  `\nいまの記録は置き換わります。よろしいですか？`)) return;
+      // 取り違えたときに戻せるよう、置き換える前の記録を退避しておく
+      try{ localStorage.setItem(KEY+'_backup', JSON.stringify(DB)); }catch(e){}
       DB.items=items; DB.demo=false; save(); go('home');
       toast(`${items.length}件を復元しました ✓`);
-    }catch(e){ toast('読み込みに失敗しました'); }
+    }catch(e){ toast((e&&e.message)||'読み込みに失敗しました'); }
   };
   rd.readAsText(f);
 }
@@ -741,7 +766,7 @@ function renderLog(){
   const list=document.getElementById('logList');
   if(arr.length===0){ list.innerHTML='<div class="empty">この月の記録はありません</div>'; return; }
   list.innerHTML=arr.map(i=>{
-    const c=CATS[i.cat];
+    const c=CATS[i.cat]||CATS.other;   // 見覚えのない分類でも一覧が止まらないように
     const alone = i.cat==='eatout'&&i.alone!==null ? `<span class="chip">${i.alone?'🙋一人':'👥複数'}</span>`:'';
     return `<div class="item" onclick="openEdit(${i.id})">
       <div class="cat-ic" style="background:${c.color}22">${c.emoji}</div>
@@ -814,9 +839,7 @@ function renderStat(){
 }
 function viewCompare(){
   const cur=itemsOf(curYM()), prev=itemsOf(prevYM());
-  const byC={},byP={};
-  for(const k in CATS){byC[k]=0;byP[k]=0;}
-  cur.forEach(i=>byC[i.cat]+=i.amount); prev.forEach(i=>byP[i.cat]+=i.amount);
+  const byC=sumByCat(cur), byP=sumByCat(prev);
   const rows=Object.keys(CATS).filter(k=>byC[k]||byP[k]).map(k=>{
     const c=CATS[k], d=byC[k]-byP[k];
     const tag = d>0?`<span style="color:var(--accent)">+¥${fmt(d)}</span>`
@@ -962,7 +985,7 @@ function aiCard(){
 }
 function copyForAI(){
   const cur=itemsOf(curYM());
-  const by={}; for(const k in CATS) by[k]=0; cur.forEach(i=>by[i.cat]+=i.amount);
+  const by=sumByCat(cur);
   const n=NOW();
   let t=`【${n.getFullYear()}年${n.getMonth()+1}月の家計簿】\n合計 ¥${fmt(sumOf(cur))}\n`;
   for(const k in CATS) if(by[k]) t+=`・${CATS[k].name}：¥${fmt(by[k])}\n`;
@@ -1283,7 +1306,11 @@ function parseVoice(text){
    「お店・合計・日付・分類」を読ませて返してもらう。
    APIキーは中継サーバー側に置いてあるので、このファイルには入っていない。
    写真は読み取りのその場かぎりで、どこにも保存しない。 */
-const OCR_URL = '';   // ← GASウェブアプリのURLをここに貼る（末尾 /exec）
+const OCR_URL   = '';   // ← GASウェブアプリのURLをここに貼る（末尾 /exec）
+const OCR_TOKEN = '';   // ← GAS側の SHARED_TOKEN と同じ合言葉をここに貼る
+/* 合言葉について：このファイルは公開されているので、本気で探せば読めます。
+   目的は「URLだけを拾って自動で叩いてくる相手を弾く」こと。
+   本当の歯止めは GAS側の1日上限と、Google Cloud 側のクォータ上限です。 */
 
 /* 送る前に長辺1280pxまで縮める。通信が軽くなり、読み取り精度もほぼ落ちない */
 function shrinkImage(file, maxSide){
@@ -1325,16 +1352,22 @@ async function scanReceipt(){
   try{
     const b64=await shrinkImage(file,1280);
     const ctrl=new AbortController();
-    const to=setTimeout(()=>ctrl.abort(),25000);        // 返ってこないまま待たせ続けない
-    const res=await fetch(OCR_URL,{
-      method:'POST',
-      headers:{'Content-Type':'text/plain;charset=utf-8'},  // 単純リクエストにしてCORSの追加確認を避ける
-      body:JSON.stringify({image:b64}),
-      signal:ctrl.signal
-    });
-    clearTimeout(to);
-    if(!res.ok) throw new Error('サーバーが応答しませんでした（'+res.status+'）');
-    const j=await res.json();
+    // 返ってこないまま待たせ続けない。本文を読み終えるまで解除しない
+    // （ヘッダだけ返して止まる相手だと、先に解除すると永久に待つことになる）
+    const to=setTimeout(()=>ctrl.abort(),25000);
+    let j;
+    try{
+      const res=await fetch(OCR_URL,{
+        method:'POST',
+        headers:{'Content-Type':'text/plain;charset=utf-8'},  // 単純リクエストにしてCORSの追加確認を避ける
+        body:JSON.stringify({image:b64, token:OCR_TOKEN}),
+        signal:ctrl.signal
+      });
+      if(!res.ok) throw new Error('サーバーが応答しませんでした（'+res.status+'）');
+      j=await res.json();
+    } finally {
+      clearTimeout(to);
+    }
     if(!j.ok) throw new Error(j.message||'読み取れませんでした');
     const amt=parseInt(j.total,10)||0;
     if(!amt){ recError('合計金額を読み取れませんでした。明るい場所で、レシート全体が入るように撮り直すか、手入力をお使いください。'); return; }
@@ -1393,7 +1426,10 @@ function confirmParsed(){
 }
 
 /* ===== 小物 ===== */
-function esc(s){ return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+/* 画面に出す文字をそのままHTMLとして解釈させないための逃がし処理。
+   品名・音声の聞き取り・レシートの読み取り結果など、外から来た文字は必ずここを通す。
+   属性値はすべて " で囲っているが、念のため ' も逃がしておく。 */
+function esc(s){ return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 let toastT;
 function toast(msg){ const el=document.getElementById('toast'); el.textContent=msg; el.classList.add('show');
   clearTimeout(toastT); toastT=setTimeout(()=>el.classList.remove('show'),1800); }
