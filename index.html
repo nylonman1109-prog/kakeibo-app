@@ -124,6 +124,13 @@
             border-top:1px dashed var(--line);padding-top:9px}
   .scan{background:#fff;border:2px dashed var(--line);border-radius:18px;padding:28px 16px;text-align:center;color:var(--sub)}
   .scan .big{font-size:40px}
+  /* レシートを費目ごとに分けた行 */
+  .split-row{border:1px solid var(--line);border-radius:14px;padding:10px;margin-bottom:8px;background:#fff}
+  .split-head{display:flex;gap:8px;align-items:center}
+  .split-head select{flex:1;min-width:0;padding:10px 8px;font-size:14px;font-weight:700;border-radius:11px}
+  .split-head input{width:96px;flex:none;padding:10px;font-size:15px;text-align:right;border-radius:11px}
+  .split-del{flex:none;width:34px;height:34px;border:none;background:transparent;color:var(--sub);font-size:15px}
+  .split-names{font-size:12px;color:var(--sub);line-height:1.6;margin-top:7px;padding:0 2px}
   .parsed{background:#fff;border-radius:16px;padding:14px;margin-top:14px;border:1px solid var(--line)}
   .parsed .ln{display:flex;justify-content:space-between;padding:6px 2px;font-size:14px}
   .toast{position:fixed;bottom:150px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:12px 22px;border-radius:99px;font-weight:700;font-size:14px;z-index:60;opacity:0;transition:opacity .2s,bottom .2s;pointer-events:none}
@@ -255,8 +262,10 @@
       品名・金額・分類を自動で判定します。<br>
       <span class="muted">コツ：金額のあとに「円」を付けると確実です。</span></div></div>
     <div class="help-step"><span class="help-ic">📷</span><div>
-      <b>レシート</b>　撮るだけ。合計金額とお店の名前を読み取り、分類まで推測します。<br>
-      <span class="muted">初回だけ、設定 →「レシート読み取りの設定」でAPIキーの登録が要ります（無料・3分）。</span></div></div>
+      <b>レシート</b>　撮るだけ。<b>中身を1行ずつ読んで、食費と日用品に自動で分けます。</b>
+      スーパーで食パンと洗剤を一緒に買っても、別々に記録されます。<br>
+      <span class="muted">分け方がちがっていたら、追加する前にその場で直せます。
+      初回だけ、設定 →「レシート読み取りの設定」でAPIキーの登録が要ります（無料・3分）。</span></div></div>
     <div class="help-step"><span class="help-ic">✏️</span><div>
       <b>手入力</b>　品名・金額・分類を直接。<b>日付を変えれば昨日以前の分</b>も入れられます。</div></div>
     <div class="note">どの方法でも、追加する前に確認画面が出ます。分類がちがっていたらその場で押し直せます。</div>
@@ -378,7 +387,7 @@
     <div class="scan" onclick="document.getElementById('recFile').click()">
       <div class="big">📷</div>
       <div style="margin-top:8px;font-weight:700">タップして撮影</div>
-      <div style="font-size:12px;margin-top:4px">合計金額を読み取り、分類を自動で推測します</div>
+      <div style="font-size:12px;margin-top:4px">中身を1行ずつ読んで、食費と日用品に自動で分けます</div>
     </div>
     <div id="recParsed"></div>
   </div>
@@ -440,6 +449,8 @@ const CATS = {
   trans: {name:'交通',   emoji:'🚃', color:'var(--lemon)'},
   other: {name:'その他', emoji:'📦', color:'#c9beb8'},
 };
+/* 費目のキー一覧。AIに返させる選択肢の縛りと、受け取った値の検査に使う */
+const CAT_KEYS = Object.keys(CATS);
 /* 自動仕分けキーワード（レシート/音声の推測用） */
 const KW = [
   ['eatout',['ラーメン','らーめん','カフェ','マック','マクド','スタバ','レストラン','居酒屋','定食','牛丼','寿司','ランチ','ディナー','焼肉','そば','うどん','丼']],
@@ -1359,25 +1370,62 @@ const GEMINI_MODEL = 'gemini-flash-latest';
 const GEMINI_API   = 'https://generativelanguage.googleapis.com/v1beta/models/';
 const OCR_KEY='yasashi_kakeibo_gemini_v1';
 
-/* 読み取りの指示。もとは中継サーバー側に置いていたものをここへ移した */
+/* 読み取りの指示。
+   ここがこのアプリの心臓部。「食費と日用品がちゃんと分かれない」のが
+   家計簿が続かなくなる最大の理由だったので、レシートを1行ずつ読ませて
+   費目に振り分けさせる。店の種類でひとまとめにしない。 */
 const OCR_PROMPT=[
-  'あなたはレシートを読み取る係です。渡された画像は日本のお店のレシートです。',
-  '次の項目だけを読み取り、JSONで返してください。',
+  'あなたは日本のレシートを読み取る専門家です。渡された画像は日本のお店のレシートです。',
+  '商品を1行ずつ読み取り、それぞれを費目に振り分けて、JSONで返してください。',
   '',
-  '- shop: お店の名前（短く。分からなければ空文字）',
-  '- total: 支払った合計金額（数字のみ。円マークやカンマは付けない）',
-  '  ※「合計」「お買上げ計」など最終的に支払った額。小計・お預り・お釣り・ポイントは選ばない。',
-  '  ※軽減税率などで複数の合計が並ぶ場合は、いちばん大きい支払総額を選ぶ。',
-  '- date: レシートの日付（YYYY-MM-DD形式。読めなければ空文字）',
-  '- category: 次から1つだけ選ぶ',
-  '    food   … スーパー・食料品店での買い物',
-  '    eatout … 飲食店・カフェ・居酒屋など、その場で食べた支払い',
-  '    daily  … ドラッグストア・日用品・文具',
-  '    fun    … 書店・ゲーム・映画・娯楽',
-  '    trans  … ガソリン・駐車場・交通費',
-  '    other  … 上のどれにも当てはまらない',
+  '━━ 商品行の読み取りかた ━━',
+  '・商品の行だけを拾う。次の行は商品ではないので lines に入れない：',
+  '  小計／合計／お買上げ計／お預り／お釣り／釣銭／現金／クレジット／',
+  '  ポイント／値引き／割引／クーポン／消費税／内税／外税／会員番号／レジ番号',
+  '・商品名が略字・カナ略記でも、分かる範囲で普通の言葉に直してよい',
+  '  （例「ﾄｲﾚﾂﾄP」→「トイレットペーパー」、「ﾌﾞﾀｺﾏ」→「豚こま肉」）',
+  '・「※」「*」「軽」などの軽減税率マークは商品名から外す',
+  '・「2点 ×128」のような数量行は、その行の支払額（合計額）を price にする',
+  '・price は税抜・税込どちらでもよい。total との差はこちらで調整するので気にしない',
+  '・読めない行があっても、読めた行だけ返せばよい',
   '',
-  'レシート以外の画像だった場合は total を 0 にしてください。'
+  '━━ total ━━',
+  '・実際に支払った合計金額（値引き後・税込）。「合計」「お買上げ計」など。',
+  '・小計・お預り・お釣り・ポイント残高は選ばない',
+  '・軽減税率などで複数の合計が並ぶ場合は、いちばん大きい支払総額を選ぶ',
+  '',
+  '━━ 費目の振り分け（ここがいちばん大事）━━',
+  'food（食費）… 口に入るもの全般',
+  '  肉・魚・野菜・果物・米・パン・麺・卵・牛乳・乳製品・豆腐・納豆',
+  '  調味料・油・砂糖・塩・味噌・醤油・だし・スパイス',
+  '  冷凍食品・レトルト・缶詰・インスタント麺・パスタ・粉類',
+  '  惣菜・弁当・おにぎり・パン・サンドイッチ（持ち帰って食べるもの）',
+  '  菓子・アイス・デザート・ヨーグルト',
+  '  飲料・お茶・コーヒー・ジュース・水・炭酸・酒類',
+  '',
+  'daily（日用品）… 食べずに使うもの・使ってなくなるもの',
+  '  洗剤・柔軟剤・漂白剤・食器用洗剤・掃除用品・スポンジ',
+  '  シャンプー・リンス・ボディソープ・石鹸・歯ブラシ・歯磨き粉・髭剃り',
+  '  トイレットペーパー・ティッシュ・キッチンペーパー・ラップ・アルミホイル',
+  '  ゴミ袋・保存袋・レジ袋',
+  '  化粧品・スキンケア・生理用品・おむつ',
+  '  医薬品・絆創膏・マスク・消毒・サプリメント',
+  '  文具・電池・電球・乾電池',
+  '',
+  'eatout（外食）… 店内で food を食べた支払い（カフェ・レストラン・居酒屋・フードコート）',
+  'fun（娯楽）… 本・雑誌・漫画・ゲーム・玩具・CD/DVD・趣味の道具',
+  'trans（交通）… ガソリン・軽油・駐車場・高速料金・切符・ICカードチャージ',
+  'other（その他）… どれにも当てはまらないもの（衣類・雑貨・家電・ペット用品など）',
+  '',
+  '━━ 迷ったときの原則 ━━',
+  '・口に入るなら food、使ってなくなるなら daily',
+  '・スーパーやドラッグストアのレシートは food と daily が混ざるのがふつう。',
+  '  面倒がらず1行ずつ見て、混ざっていれば必ず両方に振り分けること。',
+  '・店の種類で決めつけない。ドラッグストアで買った牛乳は food、',
+  '  スーパーで買った洗剤は daily。',
+  '・飲食店のレシートは、明細が読めなくても全体を eatout の1行にしてよい。',
+  '',
+  'レシート以外の画像だった場合は total を 0、lines を空の配列にしてください。'
 ].join('\n');
 
 function ocrKey(){
@@ -1504,16 +1552,25 @@ async function scanReceipt(){
           generationConfig:{
             temperature:0,
             responseMimeType:'application/json',
-            // 決まった形で返させる。自由文で返ってくると読み取り側が壊れるため
+            // 決まった形で返させる。自由文で返ってくると読み取り側が壊れるため。
+            // category は enum で縛るので、決めた6種以外は返ってこない
             responseSchema:{
               type:'OBJECT',
               properties:{
-                shop:    {type:'STRING'},
-                total:   {type:'INTEGER'},
-                date:    {type:'STRING'},
-                category:{type:'STRING'}
+                shop: {type:'STRING'},
+                total:{type:'INTEGER'},
+                date: {type:'STRING'},
+                lines:{type:'ARRAY', items:{
+                  type:'OBJECT',
+                  properties:{
+                    name:    {type:'STRING'},
+                    price:   {type:'INTEGER'},
+                    category:{type:'STRING', enum:CAT_KEYS}
+                  },
+                  required:['name','price','category']
+                }}
               },
-              required:['shop','total','date','category']
+              required:['shop','total','date','lines']
             }
           }
         }),
@@ -1534,13 +1591,10 @@ async function scanReceipt(){
     }
     const amt=parseInt(j.total,10)||0;
     if(!amt){ recError('合計金額を読み取れませんでした。明るい場所で、レシート全体が入るように撮り直すか、手入力をお使いください。'); return; }
-    // AIの返事はそのまま信じない。中継サーバーでやっていた検査をここに移した。
-    // 分類は決まった6つ以外を弾く（CATS[...] だけだと constructor などにも当たってしまう）
+    // AIの返事はそのまま信じない
     const shop = String(j.shop||'').slice(0,40);
-    const cat  = ['food','eatout','daily','fun','trans','other'].includes(j.category)
-                 ? j.category : guessCat(shop);
     const date = /^\d{4}-\d{2}-\d{2}$/.test(String(j.date||'')) ? j.date : dstr(NOW());
-    showParsed('recParsed', shop||'買い物', amt, cat, true, date);
+    showReceiptSplit(shop||'買い物', date, splitByCat(j.lines, amt, shop), amt);
   }catch(err){
     const m = err && err.name==='AbortError'
       ? '時間がかかりすぎたため中断しました。電波の良い場所でもう一度お試しください。'
@@ -1549,7 +1603,106 @@ async function scanReceipt(){
   }
 }
 
-/* ---- 読み取り結果の確認カード ----
+/* ---- レシートを費目ごとに分ける ----
+   1枚のレシートに食品と洗剤が混ざっていても、まとめて「食費」にしない。
+   ここを雑にすると分類が信用できなくなり、家計簿そのものが続かなくなる。 */
+function splitByCat(lines, total, shop){
+  const by=new Map();
+  (Array.isArray(lines)?lines:[]).forEach(l=>{
+    if(!l) return;
+    const price=parseInt(l.price,10);
+    if(!Number.isFinite(price)||price<=0||price>=1e9) return;
+    const cat=CAT_KEYS.includes(l.category)?l.category:'other';
+    const name=String(l.name||'').slice(0,30);
+    if(!by.has(cat)) by.set(cat,{cat, amount:0, names:[]});
+    const g=by.get(cat);
+    g.amount+=price;
+    if(name&&g.names.length<12) g.names.push(name);
+  });
+  const groups=[...by.values()].sort((a,b)=>b.amount-a.amount);
+  // 明細が1行も読めなければ、これまで通り全額を1つの費目に寄せる
+  if(!groups.length) return [{cat:guessCat(shop||''), amount:total, names:[]}];
+  return fitToTotal(groups, total);
+}
+/* 明細の合計はレシートの合計と一致しないのがふつう（税抜表示・値引き・ポイント）。
+   割合はそのままに、合計だけレシートに合わせる。1円のズレも出さない。 */
+function fitToTotal(groups, total){
+  const sum=groups.reduce((a,g)=>a+g.amount,0);
+  if(!sum||!total||sum===total) return groups;
+  const scaled=groups.map(g=>{ const exact=g.amount*total/sum;
+    return {...g, amount:Math.floor(exact), frac:exact-Math.floor(exact)}; });
+  let rest=total-scaled.reduce((a,g)=>a+g.amount,0);
+  // 余った端数は、切り捨てた小数が大きい行から1円ずつ配る
+  [...scaled].sort((a,b)=>b.frac-a.frac).forEach(g=>{ if(rest>0){ g.amount++; rest--; } });
+  return scaled.filter(g=>g.amount>0);
+}
+
+/* ---- レシートの確認カード（費目ごとに1行）----
+   自動で分けたうえで、金額も費目もその場で直せるようにしている */
+let rcRows=[], rcAlone=true, rcTotal=0, rcShop='', rcDate='';
+function showReceiptSplit(shop, date, groups, total){
+  rcRows=groups.map(g=>({cat:g.cat, amount:g.amount, names:g.names||[]}));
+  rcTotal=total; rcAlone=true; rcShop=shop; rcDate=date;
+  renderReceiptSplit();
+}
+function renderReceiptSplit(){
+  const sum=rcRows.reduce((a,r)=>a+(r.amount||0),0);
+  const ずれ=sum-rcTotal;
+  const rows=rcRows.map((r,i)=>`
+    <div class="split-row">
+      <div class="split-head">
+        <select onchange="rcSetCat(${i},this.value)" aria-label="分類">
+          ${CAT_KEYS.map(k=>`<option value="${k}"${k===r.cat?' selected':''}>${CATS[k].emoji} ${CATS[k].name}</option>`).join('')}
+        </select>
+        <input type="number" inputmode="numeric" value="${r.amount}" aria-label="金額"
+               onchange="rcSetAmt(${i},this.value)">
+        <button class="split-del" onclick="rcDel(${i})" aria-label="この行を消す">✕</button>
+      </div>
+      ${r.names.length?`<div class="split-names">${esc(r.names.join('、'))}</div>`:''}
+    </div>`).join('');
+  document.getElementById('recParsed').innerHTML=`<div class="parsed">
+      <div class="muted" style="font-size:12px;font-weight:700">
+        ${rcRows.length>1?'費目ごとに分けました。':'読み取りました。'}ちがっていたら直せます</div>
+      <label style="margin-top:8px">お店</label>
+      <input id="rcShop" value="${esc(rcShop)}" onchange="rcShop=this.value">
+      <label>日付</label>
+      <input id="rcDate" type="date" value="${rcDate}" onchange="rcDate=this.value">
+      <label>内訳（分類・金額とも変更できます）</label>
+      ${rows||'<div class="note">行がありません。下の「行を足す」から入れてください</div>'}
+      <button class="btn ghost" onclick="rcAdd()" style="margin-top:2px">＋ 行を足す</button>
+      <div class="ln" style="display:flex;justify-content:space-between;padding:10px 2px 2px;font-weight:800">
+        <span>合計</span><span>¥${fmt(sum)}</span></div>
+      ${ずれ?`<div class="note">レシートの合計 ¥${fmt(rcTotal)} と ¥${fmt(Math.abs(ずれ))} ${ずれ>0?'多い':'少ない'}です。直すか、このまま追加できます</div>`:''}
+      <div id="rcAloneWrap" style="margin-top:10px;display:${rcRows.some(r=>r.cat==='eatout')?'':'none'}">
+        <div class="muted" style="font-size:13px;font-weight:700">外食はだれと？</div>
+        <div class="seg-small" style="margin-top:6px">
+          <button class="${rcAlone?'on':''}" onclick="rcSetAlone(true)">🙋 一人</button>
+          <button class="${rcAlone?'':'on'}" onclick="rcSetAlone(false)">👥 複数</button></div>
+      </div>
+      <button class="btn" onclick="confirmReceipt()">この内容で追加（${rcRows.length}件）</button>
+    </div>`;
+}
+function rcSetCat(i,v){ if(rcRows[i]){ rcRows[i].cat=v; renderReceiptSplit(); } }
+function rcSetAmt(i,v){ const n=parseInt(v,10);
+  if(rcRows[i]){ rcRows[i].amount=Number.isFinite(n)&&n>0?n:0; renderReceiptSplit(); } }
+function rcDel(i){ rcRows.splice(i,1); renderReceiptSplit(); }
+function rcAdd(){ rcRows.push({cat:'food', amount:0, names:[]}); renderReceiptSplit(); }
+function rcSetAlone(v){ rcAlone=v; renderReceiptSplit(); }
+function confirmReceipt(){
+  const rows=rcRows.filter(r=>r.amount>0);
+  if(!rows.length){ toast('金額を入れてね'); return; }
+  const shop=(document.getElementById('rcShop').value||'').trim()||'買い物';
+  const date=document.getElementById('rcDate').value;
+  // 同じ費目に変更された行どうしは、1件にまとめてから追加する
+  const merged=new Map();
+  rows.forEach(r=>merged.set(r.cat,(merged.get(r.cat)||0)+r.amount));
+  merged.forEach((amount,cat)=>
+    addItem(shop, amount, cat, cat==='eatout'?rcAlone:null, date));
+  closeSheet();
+  toast(merged.size>1?`${merged.size}件に分けて追加しました ✓`:'追加しました ✓');
+}
+
+/* ---- 読み取り結果の確認カード（音声・手入力用）----
    読み取りは必ずしも当たらないので、追加する前にその場で直せるようにしている */
 let pCat='other',pAlone=true;
 function showParsed(target,name,amt,cat,fromReceipt,date){
