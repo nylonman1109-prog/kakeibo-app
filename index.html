@@ -207,6 +207,23 @@
     <input type="file" accept=".csv,text/csv" id="csvFile" onchange="importCSV(this)" style="display:none">
     <button class="btn ghost" onclick="document.getElementById('csvFile').click()" style="margin-top:10px">📂 CSVから復元する</button>
   </div>
+  <div class="card">
+    <b style="font-size:15px">レシート読み取りの設定</b>
+    <p class="muted" style="margin:4px 0 10px;font-size:13px">
+      写真から合計金額を読み取る機能を使うには、読み取りサーバーの<b>URL</b>と<b>合言葉</b>が要ります。
+      渡された2つをそのまま貼り付けてください。</p>
+    <div id="ocrState"></div>
+    <label>読み取りサーバーのURL</label>
+    <input id="ocrUrl" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false"
+           placeholder="https://script.google.com/macros/s/……/exec">
+    <label>合言葉</label>
+    <input id="ocrToken" type="text" autocomplete="off" autocapitalize="off" spellcheck="false"
+           placeholder="サーバー側と同じ文字列（無ければ空のまま）">
+    <button class="btn" onclick="saveOcr()">保存する</button>
+    <button class="btn ghost" onclick="testOcr()" style="margin-top:10px">🔌 つながるか試す</button>
+    <button class="btn ghost danger" onclick="clearOcr()" style="margin-top:10px">設定を消す</button>
+    <div class="note">この2つは<b>この端末の中だけ</b>に保存されます。設定しなくても、手入力と音声はそのまま使えます。</div>
+  </div>
   <div id="demoCard"></div>
   <div class="card">
     <b style="font-size:15px">使い方</b>
@@ -231,7 +248,8 @@
       品名・金額・分類を自動で判定します。<br>
       <span class="muted">コツ：金額のあとに「円」を付けると確実です。</span></div></div>
     <div class="help-step"><span class="help-ic">📷</span><div>
-      <b>レシート</b>　撮るだけ。合計金額とお店の名前を読み取り、分類まで推測します。</div></div>
+      <b>レシート</b>　撮るだけ。合計金額とお店の名前を読み取り、分類まで推測します。<br>
+      <span class="muted">初回だけ、設定 →「レシート読み取りの設定」に、渡されたURLと合言葉を貼り付けてください。</span></div></div>
     <div class="help-step"><span class="help-ic">✏️</span><div>
       <b>手入力</b>　品名・金額・分類を直接。<b>日付を変えれば昨日以前の分</b>も入れられます。</div></div>
     <div class="note">どの方法でも、追加する前に確認画面が出ます。分類がちがっていたらその場で押し直せます。</div>
@@ -443,7 +461,25 @@ function load(){
   if(d.demo===undefined) d.demo=false;
   return d;
 }
-function save(){ localStorage.setItem(KEY, JSON.stringify(DB)); }
+/* 保存できないことが現実にある（Safariのプライベートブラウズ、端末の保存上限）。
+   素通しにすると例外がその場で処理を止め、利用者には「追加したのに残らない」
+   としか見えない。気づけるように、最初の1回だけはっきり知らせる。 */
+let saveWarned=false;
+function save(){
+  try{
+    localStorage.setItem(KEY, JSON.stringify(DB));
+    return true;
+  }catch(e){
+    if(!saveWarned){
+      saveWarned=true;
+      alert('⚠️ この端末に記録を保存できませんでした。\n\n'+
+            'プライベートブラウズ（シークレットモード）で開いていると保存できません。'+
+            'ふつうのタブで開き直してください。\n\n'+
+            'このままでも画面の上では使えますが、閉じると記録は消えます。');
+    }
+    return false;
+  }
+}
 /* まっさらな初期状態。渡した人がそのまま自分の記録を始められるようにする */
 function seed(){ return {items:[], budget:{total:0, cats:{}}, demo:false}; }
 
@@ -645,6 +681,7 @@ function renderConf(){
       <p class="muted" style="margin:4px 0 10px;font-size:13px">お試し用の架空データが入っています。自分の記録を始めるときに消してください。</p>
       <button class="btn ghost danger" onclick="clearDemo()">サンプルを消してまっさらにする</button>
     </div>` : '';
+  renderOcr();
   document.getElementById('bTotal').value = DB.budget.total || '';
   const by=sumByCat(itemsOf(curYM()));
   document.getElementById('bCats').innerHTML=Object.keys(CATS).map(k=>{
@@ -1304,13 +1341,88 @@ function parseVoice(text){
 /* ===== レシート読み取り =====
    撮った写真を中継サーバー（GAS）に送り、AI（Gemini）に
    「お店・合計・日付・分類」を読ませて返してもらう。
-   APIキーは中継サーバー側に置いてあるので、このファイルには入っていない。
+   Gemini のAPIキーは中継サーバー側にあり、このファイルには入っていない。
+
+   その中継サーバーの「URL」と「合言葉」は、以前このファイルに直接書いていたが、
+   使う人が設定画面から貼り付ける形に変えた。理由は2つ。
+   ①渡す相手ごとにHTMLを書き換えなくて済む ②公開HTMLに合言葉が載らない。
+   貼った内容はその人の端末（localStorage）にだけ残る。
    写真は読み取りのその場かぎりで、どこにも保存しない。 */
-const OCR_URL   = '';   // ← GASウェブアプリのURLをここに貼る（末尾 /exec）
-const OCR_TOKEN = '';   // ← GAS側の SHARED_TOKEN と同じ合言葉をここに貼る
-/* 合言葉について：このファイルは公開されているので、本気で探せば読めます。
-   目的は「URLだけを拾って自動で叩いてくる相手を弾く」こと。
-   本当の歯止めは GAS側の1日上限と、Google Cloud 側のクォータ上限です。 */
+const OCR_KEY='yasashi_kakeibo_ocr_v1';
+function ocrConf(){
+  try{
+    const o=JSON.parse(localStorage.getItem(OCR_KEY)||'{}');
+    return {url:String(o.url||''), token:String(o.token||'')};
+  }catch(e){ return {url:'', token:''}; }
+}
+/* 貼り間違い・怪しいURLよけ。レシート写真を送る先なので、
+   https のGoogle Apps Script以外は受け付けない（別人のサーバーに写真が飛ぶのを防ぐ）*/
+function checkOcrUrl(url){
+  let u;
+  try{ u=new URL(url); }catch(e){ return 'URLの形になっていません。もう一度コピーし直してください'; }
+  if(u.protocol!=='https:')            return 'https:// で始まるURLだけ使えます';
+  if(u.hostname!=='script.google.com') return 'Googleのサーバー（script.google.com）のURLだけ使えます';
+  if(u.pathname.indexOf('/macros/')!==0 || !/\/exec$/.test(u.pathname))
+                                       return 'URLの末尾が /exec になっているか確かめてください';
+  return '';
+}
+function renderOcr(){
+  const c=ocrConf();
+  document.getElementById('ocrUrl').value=c.url;
+  document.getElementById('ocrToken').value=c.token;
+  document.getElementById('ocrState').innerHTML = c.url
+    ? '<div class="note">✅ 設定済みです。＋ →📷レシート から使えます</div>'
+    : '<div class="note">まだ未設定です。ここが空でも、手入力と音声はふつうに使えます</div>';
+}
+function saveOcr(){
+  const url=document.getElementById('ocrUrl').value.trim();
+  const token=document.getElementById('ocrToken').value.trim();
+  if(!url){ toast('URLを貼り付けてね'); return; }
+  const ng=checkOcrUrl(url);
+  if(ng){ toast(ng); return; }
+  try{ localStorage.setItem(OCR_KEY, JSON.stringify({url, token})); }
+  catch(e){ toast('保存できませんでした'); return; }
+  renderOcr(); toast('保存しました ✓ つながるか試してみましょう');
+}
+function clearOcr(){
+  if(!confirm('レシート読み取りの設定（URLと合言葉）を消します。よろしいですか？')) return;
+  try{ localStorage.removeItem(OCR_KEY); }catch(e){}
+  document.getElementById('ocrUrl').value='';
+  document.getElementById('ocrToken').value='';
+  renderOcr(); toast('設定を消しました');
+}
+/* つながるか試す。写真は付けずに送る。
+   サーバーは合言葉を先に照合してから写真を見るので、返ってきた言葉で
+   「URLが正しいか」と「合言葉が合っているか」が切り分けられる。
+   写真を送らないので、AIの読み取り回数は消費しない。 */
+async function testOcr(){
+  const url=document.getElementById('ocrUrl').value.trim();
+  const token=document.getElementById('ocrToken').value.trim();
+  const box=document.getElementById('ocrState');
+  const ng = url ? checkOcrUrl(url) : 'URLを貼り付けてください';
+  if(ng){ box.innerHTML=`<div class="note">⚠️ ${esc(ng)}</div>`; return; }
+  box.innerHTML='<div class="note">つないでいます…</div>';
+  const ctrl=new AbortController();
+  const to=setTimeout(()=>ctrl.abort(),15000);
+  try{
+    const res=await fetch(url,{
+      method:'POST',
+      headers:{'Content-Type':'text/plain;charset=utf-8'},   // 単純リクエストにしてCORSの追加確認を避ける
+      body:JSON.stringify({token}),
+      signal:ctrl.signal
+    });
+    if(!res.ok) throw new Error('サーバーが応答しませんでした（'+res.status+'）');
+    const j=await res.json();
+    box.innerHTML = (j && typeof j.message==='string' && j.message.indexOf('許可')>=0)
+      ? '<div class="note">⚠️ 合言葉が合っていません。サーバー側と同じ文字列か確かめてください</div>'
+      : '<div class="note">✅ つながりました。＋ →📷レシート から使えます</div>';
+  }catch(err){
+    const m = err && err.name==='AbortError'
+      ? '時間がかかりすぎました。電波の良い場所でもう一度お試しください'
+      : ((err&&err.message)||'つながりませんでした');
+    box.innerHTML=`<div class="note">⚠️ ${esc(m)}</div>`;
+  }finally{ clearTimeout(to); }
+}
 
 /* 送る前に長辺1280pxまで縮める。通信が軽くなり、読み取り精度もほぼ落ちない */
 function shrinkImage(file, maxSide){
@@ -1343,8 +1455,13 @@ async function scanReceipt(){
   input.value='';                     // 同じ写真をもう一度選び直せるように空にしておく
   if(!file) return;
   const box=document.getElementById('recParsed');
-  if(!OCR_URL){
-    recError('レシートの読み取りはただいま準備中です。手入力をお使いください。');
+  const cfg=ocrConf();
+  if(!cfg.url){
+    box.innerHTML=
+      `<div class="note">レシートの読み取りは、まだ設定が済んでいません。<br>
+         設定 →「レシート読み取りの設定」に、渡されたURLと合言葉を貼り付けてください。</div>
+       <button class="btn ghost" onclick="closeSheet();go('conf')">⚙️ 設定を開く</button>
+       <button class="btn ghost" onclick="inTab('manual')" style="margin-top:10px">✏️ 手入力で記録する</button>`;
     return;
   }
   box.innerHTML='<div class="scan"><div class="big">🔍</div><div style="margin-top:8px">読み取り中…</div>'+
@@ -1357,10 +1474,10 @@ async function scanReceipt(){
     const to=setTimeout(()=>ctrl.abort(),25000);
     let j;
     try{
-      const res=await fetch(OCR_URL,{
+      const res=await fetch(cfg.url,{
         method:'POST',
         headers:{'Content-Type':'text/plain;charset=utf-8'},  // 単純リクエストにしてCORSの追加確認を避ける
-        body:JSON.stringify({image:b64, token:OCR_TOKEN}),
+        body:JSON.stringify({image:b64, token:cfg.token}),
         signal:ctrl.signal
       });
       if(!res.ok) throw new Error('サーバーが応答しませんでした（'+res.status+'）');
