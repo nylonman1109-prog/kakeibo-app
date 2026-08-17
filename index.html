@@ -210,19 +210,26 @@
   <div class="card">
     <b style="font-size:15px">レシート読み取りの設定</b>
     <p class="muted" style="margin:4px 0 10px;font-size:13px">
-      写真から合計金額を読み取る機能を使うには、読み取りサーバーの<b>URL</b>と<b>合言葉</b>が要ります。
-      渡された2つをそのまま貼り付けてください。</p>
+      写真から合計金額を読み取るには、Google の <b>APIキー</b> が1つ要ります。
+      <b>無料で取れます</b>（下に取り方があります）。</p>
     <div id="ocrState"></div>
-    <label>読み取りサーバーのURL</label>
-    <input id="ocrUrl" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false"
-           placeholder="https://script.google.com/macros/s/……/exec">
-    <label>合言葉</label>
-    <input id="ocrToken" type="text" autocomplete="off" autocapitalize="off" spellcheck="false"
-           placeholder="サーバー側と同じ文字列（無ければ空のまま）">
+    <label>APIキー</label>
+    <input id="ocrKey" type="text" autocomplete="off" autocapitalize="off" spellcheck="false"
+           placeholder="AIza… で始まる文字列を貼り付け">
     <button class="btn" onclick="saveOcr()">保存する</button>
-    <button class="btn ghost" onclick="testOcr()" style="margin-top:10px">🔌 つながるか試す</button>
-    <button class="btn ghost danger" onclick="clearOcr()" style="margin-top:10px">設定を消す</button>
-    <div class="note">この2つは<b>この端末の中だけ</b>に保存されます。設定しなくても、手入力と音声はそのまま使えます。</div>
+    <button class="btn ghost" onclick="testOcr()" style="margin-top:10px">🔌 使えるか試す</button>
+    <button class="btn ghost danger" onclick="clearOcr()" style="margin-top:10px">キーを消す</button>
+
+    <div style="margin-top:16px;font-size:13px;font-weight:700">APIキーの取り方（3分）</div>
+    <div class="help-step" style="margin-top:8px"><span class="help-ic">1</span><div>
+      <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer"><b>Google AI Studio を開く</b></a>
+      → Googleアカウントでログイン</div></div>
+    <div class="help-step"><span class="help-ic">2</span><div>
+      <b>「APIキーを作成」</b>を押す</div></div>
+    <div class="help-step"><span class="help-ic">3</span><div>
+      出てきた <b>AIza…</b> の文字列をコピーして、上の欄に貼り付け →「保存する」</div></div>
+    <div class="note">キーは<b>この端末の中だけ</b>に保存されます。レシートを読み取るときだけ Google に送られ、
+      ほかのどこにも送られません。設定しなくても、手入力と音声はふつうに使えます。</div>
   </div>
   <div id="demoCard"></div>
   <div class="card">
@@ -249,7 +256,7 @@
       <span class="muted">コツ：金額のあとに「円」を付けると確実です。</span></div></div>
     <div class="help-step"><span class="help-ic">📷</span><div>
       <b>レシート</b>　撮るだけ。合計金額とお店の名前を読み取り、分類まで推測します。<br>
-      <span class="muted">初回だけ、設定 →「レシート読み取りの設定」に、渡されたURLと合言葉を貼り付けてください。</span></div></div>
+      <span class="muted">初回だけ、設定 →「レシート読み取りの設定」でAPIキーの登録が要ります（無料・3分）。</span></div></div>
     <div class="help-step"><span class="help-ic">✏️</span><div>
       <b>手入力</b>　品名・金額・分類を直接。<b>日付を変えれば昨日以前の分</b>も入れられます。</div></div>
     <div class="note">どの方法でも、追加する前に確認画面が出ます。分類がちがっていたらその場で押し直せます。</div>
@@ -1339,87 +1346,99 @@ function parseVoice(text){
 }
 
 /* ===== レシート読み取り =====
-   撮った写真を中継サーバー（GAS）に送り、AI（Gemini）に
-   「お店・合計・日付・分類」を読ませて返してもらう。
-   Gemini のAPIキーは中継サーバー側にあり、このファイルには入っていない。
+   撮った写真をそのまま Google の Gemini に送り、
+   「お店・合計・日付・分類」だけを読ませて返してもらう。
 
-   その中継サーバーの「URL」と「合言葉」は、以前このファイルに直接書いていたが、
-   使う人が設定画面から貼り付ける形に変えた。理由は2つ。
-   ①渡す相手ごとにHTMLを書き換えなくて済む ②公開HTMLに合言葉が載らない。
-   貼った内容はその人の端末（localStorage）にだけ残る。
+   以前は中継サーバー（GAS）をはさみ、APIキーをそこに隠していた。
+   いまは使う人が自分のキーを設定画面に貼る形にしたので、中継は要らない。
+   ・使う人＝キーの持ち主なので、こちらに請求が来ない
+   ・準備がGASのデプロイ不要になり「キーを貼るだけ」で済む
+   キーはその人の端末（localStorage）にだけ残り、送り先は Google のみ。
    写真は読み取りのその場かぎりで、どこにも保存しない。 */
-const OCR_KEY='yasashi_kakeibo_ocr_v1';
-function ocrConf(){
-  try{
-    const o=JSON.parse(localStorage.getItem(OCR_KEY)||'{}');
-    return {url:String(o.url||''), token:String(o.token||'')};
-  }catch(e){ return {url:'', token:''}; }
+const GEMINI_MODEL = 'gemini-flash-latest';
+const GEMINI_API   = 'https://generativelanguage.googleapis.com/v1beta/models/';
+const OCR_KEY='yasashi_kakeibo_gemini_v1';
+
+/* 読み取りの指示。もとは中継サーバー側に置いていたものをここへ移した */
+const OCR_PROMPT=[
+  'あなたはレシートを読み取る係です。渡された画像は日本のお店のレシートです。',
+  '次の項目だけを読み取り、JSONで返してください。',
+  '',
+  '- shop: お店の名前（短く。分からなければ空文字）',
+  '- total: 支払った合計金額（数字のみ。円マークやカンマは付けない）',
+  '  ※「合計」「お買上げ計」など最終的に支払った額。小計・お預り・お釣り・ポイントは選ばない。',
+  '  ※軽減税率などで複数の合計が並ぶ場合は、いちばん大きい支払総額を選ぶ。',
+  '- date: レシートの日付（YYYY-MM-DD形式。読めなければ空文字）',
+  '- category: 次から1つだけ選ぶ',
+  '    food   … スーパー・食料品店での買い物',
+  '    eatout … 飲食店・カフェ・居酒屋など、その場で食べた支払い',
+  '    daily  … ドラッグストア・日用品・文具',
+  '    fun    … 書店・ゲーム・映画・娯楽',
+  '    trans  … ガソリン・駐車場・交通費',
+  '    other  … 上のどれにも当てはまらない',
+  '',
+  'レシート以外の画像だった場合は total を 0 にしてください。'
+].join('\n');
+
+function ocrKey(){
+  try{ return String(localStorage.getItem(OCR_KEY)||''); }catch(e){ return ''; }
 }
-/* 貼り間違い・怪しいURLよけ。レシート写真を送る先なので、
-   https のGoogle Apps Script以外は受け付けない（別人のサーバーに写真が飛ぶのを防ぐ）*/
-function checkOcrUrl(url){
-  let u;
-  try{ u=new URL(url); }catch(e){ return 'URLの形になっていません。もう一度コピーし直してください'; }
-  if(u.protocol!=='https:')            return 'https:// で始まるURLだけ使えます';
-  if(u.hostname!=='script.google.com') return 'Googleのサーバー（script.google.com）のURLだけ使えます';
-  if(u.pathname.indexOf('/macros/')!==0 || !/\/exec$/.test(u.pathname))
-                                       return 'URLの末尾が /exec になっているか確かめてください';
-  return '';
+/* 中継サーバー方式だった頃のURLと合言葉が端末に残っていても、もう使わない。
+   古い合言葉を置きっぱなしにしないよう、開いたときに片づける。 */
+try{ localStorage.removeItem('yasashi_kakeibo_ocr_v1'); }catch(e){}
+/* 貼り間違いをその場で気づけるように、形だけ見る。
+   本当に使えるかは「使えるか試す」で Google に聞く。 */
+function checkOcrKey(k){
+  if(/^AIza[0-9A-Za-z_\-]{20,}$/.test(k)) return '';
+  if(/^https?:/i.test(k)) return 'それはURLのようです。AIza… で始まるAPIキーを貼り付けてください';
+  return 'キーの形が違うようです。AIza… で始まる文字列をそのまま貼り付けてください';
 }
 function renderOcr(){
-  const c=ocrConf();
-  document.getElementById('ocrUrl').value=c.url;
-  document.getElementById('ocrToken').value=c.token;
-  document.getElementById('ocrState').innerHTML = c.url
+  const k=ocrKey();
+  document.getElementById('ocrKey').value=k;
+  document.getElementById('ocrState').innerHTML = k
     ? '<div class="note">✅ 設定済みです。＋ →📷レシート から使えます</div>'
     : '<div class="note">まだ未設定です。ここが空でも、手入力と音声はふつうに使えます</div>';
 }
 function saveOcr(){
-  const url=document.getElementById('ocrUrl').value.trim();
-  const token=document.getElementById('ocrToken').value.trim();
-  if(!url){ toast('URLを貼り付けてね'); return; }
-  const ng=checkOcrUrl(url);
+  const k=document.getElementById('ocrKey').value.trim();
+  if(!k){ toast('APIキーを貼り付けてね'); return; }
+  const ng=checkOcrKey(k);
   if(ng){ toast(ng); return; }
-  try{ localStorage.setItem(OCR_KEY, JSON.stringify({url, token})); }
+  try{ localStorage.setItem(OCR_KEY, k); }
   catch(e){ toast('保存できませんでした'); return; }
-  renderOcr(); toast('保存しました ✓ つながるか試してみましょう');
+  renderOcr(); toast('保存しました ✓ 使えるか試してみましょう');
 }
 function clearOcr(){
-  if(!confirm('レシート読み取りの設定（URLと合言葉）を消します。よろしいですか？')) return;
+  if(!confirm('保存したAPIキーを消します。よろしいですか？')) return;
   try{ localStorage.removeItem(OCR_KEY); }catch(e){}
-  document.getElementById('ocrUrl').value='';
-  document.getElementById('ocrToken').value='';
-  renderOcr(); toast('設定を消しました');
+  document.getElementById('ocrKey').value='';
+  renderOcr(); toast('キーを消しました');
 }
-/* つながるか試す。写真は付けずに送る。
-   サーバーは合言葉を先に照合してから写真を見るので、返ってきた言葉で
-   「URLが正しいか」と「合言葉が合っているか」が切り分けられる。
-   写真を送らないので、AIの読み取り回数は消費しない。 */
+/* 使えるか試す。モデルの情報を取りに行くだけで、画像も文章も生成させない。
+   ＝キーが有効かどうかだけを、無料枠をほとんど使わずに確かめられる。 */
 async function testOcr(){
-  const url=document.getElementById('ocrUrl').value.trim();
-  const token=document.getElementById('ocrToken').value.trim();
+  const k=document.getElementById('ocrKey').value.trim();
   const box=document.getElementById('ocrState');
-  const ng = url ? checkOcrUrl(url) : 'URLを貼り付けてください';
+  const ng = k ? checkOcrKey(k) : 'APIキーを貼り付けてください';
   if(ng){ box.innerHTML=`<div class="note">⚠️ ${esc(ng)}</div>`; return; }
-  box.innerHTML='<div class="note">つないでいます…</div>';
+  box.innerHTML='<div class="note">確かめています…</div>';
   const ctrl=new AbortController();
   const to=setTimeout(()=>ctrl.abort(),15000);
   try{
-    const res=await fetch(url,{
-      method:'POST',
-      headers:{'Content-Type':'text/plain;charset=utf-8'},   // 単純リクエストにしてCORSの追加確認を避ける
-      body:JSON.stringify({token}),
-      signal:ctrl.signal
+    const res=await fetch(GEMINI_API+GEMINI_MODEL,{
+      headers:{'x-goog-api-key':k}, signal:ctrl.signal
     });
-    if(!res.ok) throw new Error('サーバーが応答しませんでした（'+res.status+'）');
-    const j=await res.json();
-    box.innerHTML = (j && typeof j.message==='string' && j.message.indexOf('許可')>=0)
-      ? '<div class="note">⚠️ 合言葉が合っていません。サーバー側と同じ文字列か確かめてください</div>'
-      : '<div class="note">✅ つながりました。＋ →📷レシート から使えます</div>';
+    if(res.status===400||res.status===403){
+      box.innerHTML='<div class="note">⚠️ このキーは使えませんでした。コピーし直すか、作り直してみてください</div>';
+      return;
+    }
+    if(!res.ok) throw new Error('Googleが応答しませんでした（'+res.status+'）');
+    box.innerHTML='<div class="note">✅ 使えます。＋ →📷レシート から読み取れます</div>';
   }catch(err){
     const m = err && err.name==='AbortError'
       ? '時間がかかりすぎました。電波の良い場所でもう一度お試しください'
-      : ((err&&err.message)||'つながりませんでした');
+      : ((err&&err.message)||'確かめられませんでした');
     box.innerHTML=`<div class="note">⚠️ ${esc(m)}</div>`;
   }finally{ clearTimeout(to); }
 }
@@ -1455,11 +1474,11 @@ async function scanReceipt(){
   input.value='';                     // 同じ写真をもう一度選び直せるように空にしておく
   if(!file) return;
   const box=document.getElementById('recParsed');
-  const cfg=ocrConf();
-  if(!cfg.url){
+  const key=ocrKey();
+  if(!key){
     box.innerHTML=
       `<div class="note">レシートの読み取りは、まだ設定が済んでいません。<br>
-         設定 →「レシート読み取りの設定」に、渡されたURLと合言葉を貼り付けてください。</div>
+         設定 →「レシート読み取りの設定」で、APIキーを1つ登録してください（無料・3分）。</div>
        <button class="btn ghost" onclick="closeSheet();go('conf')">⚙️ 設定を開く</button>
        <button class="btn ghost" onclick="inTab('manual')" style="margin-top:10px">✏️ 手入力で記録する</button>`;
     return;
@@ -1474,23 +1493,54 @@ async function scanReceipt(){
     const to=setTimeout(()=>ctrl.abort(),25000);
     let j;
     try{
-      const res=await fetch(cfg.url,{
+      const res=await fetch(GEMINI_API+GEMINI_MODEL+':generateContent',{
         method:'POST',
-        headers:{'Content-Type':'text/plain;charset=utf-8'},  // 単純リクエストにしてCORSの追加確認を避ける
-        body:JSON.stringify({image:b64, token:cfg.token}),
+        headers:{'Content-Type':'application/json','x-goog-api-key':key},
+        body:JSON.stringify({
+          contents:[{parts:[
+            {text:OCR_PROMPT},
+            {inline_data:{mime_type:'image/jpeg', data:b64}}
+          ]}],
+          generationConfig:{
+            temperature:0,
+            responseMimeType:'application/json',
+            // 決まった形で返させる。自由文で返ってくると読み取り側が壊れるため
+            responseSchema:{
+              type:'OBJECT',
+              properties:{
+                shop:    {type:'STRING'},
+                total:   {type:'INTEGER'},
+                date:    {type:'STRING'},
+                category:{type:'STRING'}
+              },
+              required:['shop','total','date','category']
+            }
+          }
+        }),
         signal:ctrl.signal
       });
-      if(!res.ok) throw new Error('サーバーが応答しませんでした（'+res.status+'）');
-      j=await res.json();
+      // 利用者が自分で直せる失敗は、原因が分かる言葉にして返す
+      if(res.status===400||res.status===403)
+        throw new Error('APIキーが使えませんでした。設定を見直してください');
+      if(res.status===429)
+        throw new Error('読み取りの無料枠を使い切ったようです。しばらく待ってからお試しください');
+      if(!res.ok) throw new Error('Googleが応答しませんでした（'+res.status+'）');
+      const body=await res.json();
+      const text=body?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if(!text) throw new Error('レシートを読み取れませんでした');
+      j=JSON.parse(text);
     } finally {
       clearTimeout(to);
     }
-    if(!j.ok) throw new Error(j.message||'読み取れませんでした');
     const amt=parseInt(j.total,10)||0;
     if(!amt){ recError('合計金額を読み取れませんでした。明るい場所で、レシート全体が入るように撮り直すか、手入力をお使いください。'); return; }
-    const cat = CATS[j.category] ? j.category : guessCat(j.shop||'');
-    const date = /^\d{4}-\d{2}-\d{2}$/.test(j.date||'') ? j.date : dstr(NOW());
-    showParsed('recParsed', j.shop||'買い物', amt, cat, true, date);
+    // AIの返事はそのまま信じない。中継サーバーでやっていた検査をここに移した。
+    // 分類は決まった6つ以外を弾く（CATS[...] だけだと constructor などにも当たってしまう）
+    const shop = String(j.shop||'').slice(0,40);
+    const cat  = ['food','eatout','daily','fun','trans','other'].includes(j.category)
+                 ? j.category : guessCat(shop);
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(String(j.date||'')) ? j.date : dstr(NOW());
+    showParsed('recParsed', shop||'買い物', amt, cat, true, date);
   }catch(err){
     const m = err && err.name==='AbortError'
       ? '時間がかかりすぎたため中断しました。電波の良い場所でもう一度お試しください。'
