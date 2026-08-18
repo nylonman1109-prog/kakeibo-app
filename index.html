@@ -222,7 +222,7 @@
     <div id="ocrState"></div>
     <label>APIキー</label>
     <input id="ocrKey" type="text" autocomplete="off" autocapitalize="off" spellcheck="false"
-           placeholder="AIza… で始まる文字列を貼り付け">
+           placeholder="コピーしたキーを貼り付け">
     <button class="btn" onclick="saveOcr()">保存する</button>
     <button class="btn ghost" onclick="testOcr()" style="margin-top:10px">🔌 使えるか試す</button>
     <button class="btn ghost danger" onclick="clearOcr()" style="margin-top:10px">キーを消す</button>
@@ -234,7 +234,7 @@
     <div class="help-step"><span class="help-ic">2</span><div>
       <b>「APIキーを作成」</b>を押す</div></div>
     <div class="help-step"><span class="help-ic">3</span><div>
-      出てきた <b>AIza…</b> の文字列をコピーして、上の欄に貼り付け →「保存する」</div></div>
+      出てきた文字列を<b>まるごとコピー</b>して、上の欄に貼り付け →「保存する」</div></div>
     <div class="note">キーは<b>この端末の中だけ</b>に保存されます。レシートを読み取るときだけ Google に送られ、
       ほかのどこにも送られません。設定しなくても、手入力と音声はふつうに使えます。</div>
   </div>
@@ -1434,12 +1434,17 @@ function ocrKey(){
 /* 中継サーバー方式だった頃のURLと合言葉が端末に残っていても、もう使わない。
    古い合言葉を置きっぱなしにしないよう、開いたときに片づける。 */
 try{ localStorage.removeItem('yasashi_kakeibo_ocr_v1'); }catch(e){}
-/* 貼り間違いをその場で気づけるように、形だけ見る。
+/* 貼り間違いをその場で気づけるように、明らかな失敗だけ見る。
+   キーの形は Google 側の都合で変わる（AIza… の標準キーから AQ.… の認証キーへ移行中で、
+   標準キーは2026年9月に使えなくなる）。ここで形を決めつけると、
+   新しい形のキーを勝手に弾いてしまうので、prefix では判定しない。
    本当に使えるかは「使えるか試す」で Google に聞く。 */
 function checkOcrKey(k){
-  if(/^AIza[0-9A-Za-z_\-]{20,}$/.test(k)) return '';
-  if(/^https?:/i.test(k)) return 'それはURLのようです。AIza… で始まるAPIキーを貼り付けてください';
-  return 'キーの形が違うようです。AIza… で始まる文字列をそのまま貼り付けてください';
+  if(/^https?:/i.test(k))          return 'それはURLのようです。APIキーの方を貼り付けてください';
+  if(/\s/.test(k))                 return '途中に空白か改行が混ざっています。もう一度コピーし直してください';
+  if(k.length<20)                  return 'キーが短いようです。全部コピーできているか確かめてください';
+  if(!/^[A-Za-z0-9._\-]+$/.test(k)) return 'キーに使わない文字が混ざっています。もう一度コピーし直してください';
+  return '';
 }
 function renderOcr(){
   const k=ocrKey();
@@ -1463,8 +1468,10 @@ function clearOcr(){
   document.getElementById('ocrKey').value='';
   renderOcr(); toast('キーを消しました');
 }
-/* 使えるか試す。モデルの情報を取りに行くだけで、画像も文章も生成させない。
-   ＝キーが有効かどうかだけを、無料枠をほとんど使わずに確かめられる。 */
+/* 使えるか試す。レシート読み取りと同じ generateContent を、ごく短い文章で1回だけ叩く。
+   モデル情報の取得（models.get）で代用していたが、それだと本番と別の経路になり、
+   キーの種類によっては結果が食い違いうる。実際に使う経路で確かめるほうが確実。
+   送るのは数文字なので、無料枠の消費はごくわずか。 */
 async function testOcr(){
   const k=document.getElementById('ocrKey').value.trim();
   const box=document.getElementById('ocrState');
@@ -1472,17 +1479,29 @@ async function testOcr(){
   if(ng){ box.innerHTML=`<div class="note">⚠️ ${esc(ng)}</div>`; return; }
   box.innerHTML='<div class="note">確かめています…</div>';
   const ctrl=new AbortController();
-  const to=setTimeout(()=>ctrl.abort(),15000);
+  const to=setTimeout(()=>ctrl.abort(),20000);
   try{
-    const res=await fetch(GEMINI_API+GEMINI_MODEL,{
-      headers:{'x-goog-api-key':k}, signal:ctrl.signal
+    const res=await fetch(GEMINI_API+GEMINI_MODEL+':generateContent',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-goog-api-key':k},
+      body:JSON.stringify({contents:[{parts:[{text:'ping'}]}]}),
+      signal:ctrl.signal
     });
-    if(res.status===400||res.status===403){
-      box.innerHTML='<div class="note">⚠️ このキーは使えませんでした。コピーし直すか、作り直してみてください</div>';
+    if(res.ok){
+      box.innerHTML='<div class="note">✅ 使えます。＋ →📷レシート から読み取れます</div>';
       return;
     }
-    if(!res.ok) throw new Error('Googleが応答しませんでした（'+res.status+'）');
-    box.innerHTML='<div class="note">✅ 使えます。＋ →📷レシート から読み取れます</div>';
+    // Googleが返した理由をそのまま見せる。伏せると原因にたどり着けない
+    let 理由='';
+    try{ const e=await res.json(); 理由=(e&&e.error&&e.error.message)||''; }catch(_){}
+    const 手当て = res.status===429
+      ? '無料枠を使い切ったようです。しばらく待ってからお試しください'
+      : [400,401,403].includes(res.status)
+        ? 'このキーでは読み取れませんでした。コピーし直すか、作り直してみてください'
+        : 'Googleが応答しませんでした（'+res.status+'）';
+    box.innerHTML=`<div class="note">⚠️ ${esc(手当て)}`+
+      (理由?`<br><span style="font-weight:600;font-size:12px">Googleからの返答：${esc(理由.slice(0,160))}</span>`:'')+
+      `</div>`;
   }catch(err){
     const m = err && err.name==='AbortError'
       ? '時間がかかりすぎました。電波の良い場所でもう一度お試しください'
@@ -1577,7 +1596,7 @@ async function scanReceipt(){
         signal:ctrl.signal
       });
       // 利用者が自分で直せる失敗は、原因が分かる言葉にして返す
-      if(res.status===400||res.status===403)
+      if([400,401,403].includes(res.status))
         throw new Error('APIキーが使えませんでした。設定を見直してください');
       if(res.status===429)
         throw new Error('読み取りの無料枠を使い切ったようです。しばらく待ってからお試しください');
