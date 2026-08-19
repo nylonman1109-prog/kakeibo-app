@@ -1366,8 +1366,50 @@ function parseVoice(text){
    ・準備がGASのデプロイ不要になり「キーを貼るだけ」で済む
    キーはその人の端末（localStorage）にだけ残り、送り先は Google のみ。
    写真は読み取りのその場かぎりで、どこにも保存しない。 */
-const GEMINI_MODEL = 'gemini-flash-latest';
-const GEMINI_API   = 'https://generativelanguage.googleapis.com/v1beta/models/';
+const GEMINI_API = 'https://generativelanguage.googleapis.com/v1beta/models/';
+/* 使うモデルは上から順に試す。
+   gemini-flash-latest だけを指していたら、Google側の混雑（503）でそのまま失敗していた。
+   -latest は新しいモデルへ勝手に載せ替わる名前で、載せ替わった直後がいちばん混む。
+   なので、まず落ち着いた安定版を指名し、ダメなら順に古い方へ下げる。
+   最後に -latest を置いてあるのは保険で、将来モデル名が全部変わっても
+   （＝上の3つが404になっても）動き続けるようにするため。 */
+const GEMINI_MODELS = ['gemini-3.5-flash','gemini-2.5-flash','gemini-3.7-flash','gemini-flash-latest'];
+const sleep = ms => new Promise(r=>setTimeout(r,ms));
+
+/* Geminiを呼ぶ。混雑していたら少し待って回し直し、それでもダメなら次のモデルへ。
+   キーの問題だけは何度やっても同じなので、すぐ止める。 */
+async function callGemini(key, payload, signal, deadline){
+  let 最後の理由='', 最後のcode=0;
+  for(let m=0; m<GEMINI_MODELS.length; m++){
+    // 最初のモデルだけ2回試す。全部2回だと待たせすぎるため
+    const 回数 = m===0 ? 2 : 1;
+    for(let i=0; i<回数; i++){
+      if(Date.now()>deadline) break;
+      const res=await fetch(GEMINI_API+GEMINI_MODELS[m]+':generateContent',{
+        method:'POST',
+        headers:{'Content-Type':'application/json','x-goog-api-key':key},
+        body:JSON.stringify(payload),
+        signal
+      });
+      if(res.ok) return res.json();
+      let 理由='';
+      try{ const e=await res.json(); 理由=(e&&e.error&&e.error.message)||''; }catch(_){}
+      最後の理由=理由; 最後のcode=res.status;
+      // キーが通らない＝設定の問題。モデルを変えても直らない
+      if([400,401,403].includes(res.status)){
+        const err=new Error('APIキーが使えませんでした。設定を見直してください');
+        err.reason=理由; throw err;
+      }
+      if(res.status===404) break;               // その名前のモデルが無い → 次のモデルへ
+      if(i+1<回数) await sleep(1200);           // 混雑 → 少し待って同じモデルをもう一度
+    }
+  }
+  const err=new Error(最後のcode===429
+    ? '読み取りの無料枠を使い切ったようです。しばらく待ってからお試しください'
+    : 'Google側がいま混み合っています。少し時間をおいてもう一度お試しください');
+  err.reason=最後の理由; err.code=最後のcode;
+  throw err;
+}
 const OCR_KEY='yasashi_kakeibo_gemini_v1';
 
 /* 読み取りの指示。
@@ -1479,34 +1521,18 @@ async function testOcr(){
   if(ng){ box.innerHTML=`<div class="note">⚠️ ${esc(ng)}</div>`; return; }
   box.innerHTML='<div class="note">確かめています…</div>';
   const ctrl=new AbortController();
-  const to=setTimeout(()=>ctrl.abort(),20000);
+  const to=setTimeout(()=>ctrl.abort(),40000);
   try{
-    const res=await fetch(GEMINI_API+GEMINI_MODEL+':generateContent',{
-      method:'POST',
-      headers:{'Content-Type':'application/json','x-goog-api-key':k},
-      body:JSON.stringify({contents:[{parts:[{text:'ping'}]}]}),
-      signal:ctrl.signal
-    });
-    if(res.ok){
-      box.innerHTML='<div class="note">✅ 使えます。＋ →📷レシート から読み取れます</div>';
-      return;
-    }
-    // Googleが返した理由をそのまま見せる。伏せると原因にたどり着けない
-    let 理由='';
-    try{ const e=await res.json(); 理由=(e&&e.error&&e.error.message)||''; }catch(_){}
-    const 手当て = res.status===429
-      ? '無料枠を使い切ったようです。しばらく待ってからお試しください'
-      : [400,401,403].includes(res.status)
-        ? 'このキーでは読み取れませんでした。コピーし直すか、作り直してみてください'
-        : 'Googleが応答しませんでした（'+res.status+'）';
-    box.innerHTML=`<div class="note">⚠️ ${esc(手当て)}`+
-      (理由?`<br><span style="font-weight:600;font-size:12px">Googleからの返答：${esc(理由.slice(0,160))}</span>`:'')+
-      `</div>`;
+    await callGemini(k, {contents:[{parts:[{text:'ping'}]}]}, ctrl.signal, Date.now()+37000);
+    box.innerHTML='<div class="note">✅ 使えます。＋ →📷レシート から読み取れます</div>';
   }catch(err){
     const m = err && err.name==='AbortError'
       ? '時間がかかりすぎました。電波の良い場所でもう一度お試しください'
       : ((err&&err.message)||'確かめられませんでした');
-    box.innerHTML=`<div class="note">⚠️ ${esc(m)}</div>`;
+    // Googleが返した理由も出す。伏せると原因にたどり着けない
+    box.innerHTML=`<div class="note">⚠️ ${esc(m)}`+
+      (err&&err.reason?`<br><span style="font-weight:600;font-size:12px">Googleからの返答：${esc(String(err.reason).slice(0,160))}</span>`:'')+
+      `</div>`;
   }finally{ clearTimeout(to); }
 }
 
@@ -1557,13 +1583,10 @@ async function scanReceipt(){
     const ctrl=new AbortController();
     // 返ってこないまま待たせ続けない。本文を読み終えるまで解除しない
     // （ヘッダだけ返して止まる相手だと、先に解除すると永久に待つことになる）
-    const to=setTimeout(()=>ctrl.abort(),25000);
+    const to=setTimeout(()=>ctrl.abort(),45000);
     let j;
     try{
-      const res=await fetch(GEMINI_API+GEMINI_MODEL+':generateContent',{
-        method:'POST',
-        headers:{'Content-Type':'application/json','x-goog-api-key':key},
-        body:JSON.stringify({
+      const body=await callGemini(key, {
           contents:[{parts:[
             {text:OCR_PROMPT},
             {inline_data:{mime_type:'image/jpeg', data:b64}}
@@ -1592,16 +1615,7 @@ async function scanReceipt(){
               required:['shop','total','date','lines']
             }
           }
-        }),
-        signal:ctrl.signal
-      });
-      // 利用者が自分で直せる失敗は、原因が分かる言葉にして返す
-      if([400,401,403].includes(res.status))
-        throw new Error('APIキーが使えませんでした。設定を見直してください');
-      if(res.status===429)
-        throw new Error('読み取りの無料枠を使い切ったようです。しばらく待ってからお試しください');
-      if(!res.ok) throw new Error('Googleが応答しませんでした（'+res.status+'）');
-      const body=await res.json();
+        }, ctrl.signal, Date.now()+42000);
       const text=body?.candidates?.[0]?.content?.parts?.[0]?.text;
       if(!text) throw new Error('レシートを読み取れませんでした');
       j=JSON.parse(text);
@@ -1617,7 +1631,7 @@ async function scanReceipt(){
   }catch(err){
     const m = err && err.name==='AbortError'
       ? '時間がかかりすぎたため中断しました。電波の良い場所でもう一度お試しください。'
-      : '読み取りに失敗しました（'+((err&&err.message)||'原因不明')+'）。';
+      : ((err&&err.message)||'読み取りに失敗しました');
     recError(m);
   }
 }
